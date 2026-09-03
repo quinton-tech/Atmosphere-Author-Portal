@@ -4,8 +4,6 @@
  * `import "server-only"` and throws unconditionally outside Next's bundler — including under
  * plain vitest, which doesn't set the `react-server` export condition either).
  */
-import { PDFParse } from "pdf-parse";
-import mammoth from "mammoth";
 import type { HandbookSection } from "@/db/schema";
 
 /** Extract raw text from an uploaded handbook file. PDF via `pdf-parse`, DOCX via `mammoth`. */
@@ -14,6 +12,9 @@ export async function extractText(file: { name: string; bytes: Uint8Array }): Pr
   const buffer = Buffer.from(file.bytes);
 
   if (lower.endsWith(".pdf")) {
+    // Loaded lazily: pdf-parse (pdfjs) touches browser globals at import time and must never be
+    // evaluated on a normal page render. Only the upload path pays for it.
+    const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: buffer });
     try {
       const result = await parser.getText();
@@ -24,6 +25,7 @@ export async function extractText(file: { name: string; bytes: Uint8Array }): Pr
   }
 
   if (lower.endsWith(".docx")) {
+    const { default: mammoth } = await import("mammoth");
     const result = await mammoth.extractRawText({ buffer });
     return result.value;
   }
