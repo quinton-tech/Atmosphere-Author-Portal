@@ -128,7 +128,7 @@ Every additional admin you create must enroll TOTP the same way on their first `
 
 ## 9. Verifying crons in the Vercel dashboard
 
-1. Deploy with `vercel.json` present — it declares two crons: `*/10 * * * *` hitting `/api/cron/sync?kind=incremental`, and `15 3 * * *` hitting `/api/cron/sync?kind=full`.
+1. Deploy with `vercel.json` present — it declares two crons hitting `/api/cron/sync?kind=incremental` and `?kind=full`. **The committed schedules are once-daily (`30 3 * * *` and `15 3 * * *`) because Vercel Hobby only allows daily crons.** On Pro, change the incremental schedule to `*/10 * * * *` so stage changes reach authors within ten minutes; until then the admin "Run incremental sync" button on `/admin/health` is the fast path.
 2. In the Vercel dashboard: Project → Settings → Cron Jobs should list both, showing next scheduled run.
 3. After the first scheduled run (or trigger one manually from `/admin/health` — see below), check Project → Logs, filtered to `/api/cron/sync`, for a 200 response and check `/admin/health`'s "Last 20 sync runs" table for a row with `status: ok`.
 4. You can also trigger a sync immediately without waiting for the schedule, from `/admin/health` → "Run incremental sync" / "Run full sync" buttons, or from the CLI:
