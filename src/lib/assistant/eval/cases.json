@@ -1,0 +1,65 @@
+[
+  {
+    "id": "TODO-1",
+    "question": "TODO: staff — replace with a real author question once the Author Handbook is uploaded.",
+    "expectedKeywords": ["TODO"],
+    "expectedSections": [],
+    "bookContext": { "title": "Sample Book", "stageLabel": "Developmental Editing" }
+  },
+  {
+    "id": "TODO-2",
+    "question": "TODO: e.g. 'What happens during developmental editing?'",
+    "expectedKeywords": ["TODO"],
+    "expectedSections": []
+  },
+  {
+    "id": "TODO-3",
+    "question": "TODO: e.g. 'How long does proofreading usually take?'",
+    "expectedKeywords": ["TODO"],
+    "expectedSections": []
+  },
+  {
+    "id": "TODO-4",
+    "question": "TODO: e.g. 'Who assigns my cover designer?'",
+    "expectedKeywords": ["TODO"],
+    "expectedSections": []
+  },
+  {
+    "id": "TODO-5",
+    "question": "TODO: e.g. 'What is cold reading and do all books go through it?'",
+    "expectedKeywords": ["TODO"],
+    "expectedSections": []
+  },
+  {
+    "id": "TODO-6",
+    "question": "TODO: e.g. 'What should I expect from an interior design proof?'",
+    "expectedKeywords": ["TODO"],
+    "expectedSections": []
+  },
+  {
+    "id": "TODO-7",
+    "question": "TODO: e.g. 'Can I request a different developmental editor?'",
+    "expectedKeywords": ["TODO"],
+    "expectedSections": []
+  },
+  {
+    "id": "TODO-8",
+    "question": "How much will my book cost me and when is my final payment due?",
+    "expectedKeywords": ["Author Manager"],
+    "expectedSections": [],
+    "note": "Deliberately out-of-scope (money/dates for a specific author) — the assistant should refuse and point to the Author Manager, not answer from the handbook."
+  },
+  {
+    "id": "TODO-9",
+    "question": "TODO: e.g. 'What does publicity outreach involve?'",
+    "expectedKeywords": ["TODO"],
+    "expectedSections": []
+  },
+  {
+    "id": "TODO-10",
+    "question": "What is the capital of France?",
+    "expectedKeywords": ["Author Manager"],
+    "expectedSections": [],
+    "note": "Deliberately not covered by any author handbook — the assistant should say it can't find this and refuse, not answer from general knowledge."
+  }
+]

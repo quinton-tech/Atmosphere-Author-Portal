@@ -1,0 +1,58 @@
+# Architecture
+
+Short reference. For setup see `docs/DEPLOY.md`; for operating it see `docs/RUNBOOKS.md`.
+
+## Data flow: HubSpot → sync → Postgres → pages
+
+HubSpot is the system of record for production data (a "Project" custom object per book, associated with a Contact per author). The portal never queries HubSpot at request time — it only reads from Postgres.
+
+1. **Cron trigger**: Vercel Cron hits `GET /api/cron/sync?kind=incremental` every 10 minutes and `?kind=full` nightly (`vercel.json`), authenticated with `Authorization: Bearer <CRON_SECRET>` (`src/app/api/cron/sync/route.ts`). The same entry points are reachable from `/admin/health`'s buttons and `npm run sync:hubspot -- --kind=full` from the CLI.
+2. **Fetch + plan**: `runIncrementalSync()` / `runFullSync()` (`src/lib/hubspot/sync.ts`) page through HubSpot's search API (100 Projects/page) via `src/lib/hubspot/client.ts` — a thin, mockable `HubSpotReader` interface wrapping `@hubspot/api-client`, with its own exponential-backoff retry (429/502/503/504, up to 5 attempts, honoring `Retry-After`) and a concurrency cap of 4 in-flight requests. Each page is turned into a pure `SyncPlan` (users to upsert, books to upsert, cache rows to upsert) before anything touches the database.
+3. **Property mapping**: only properties listed in `src/lib/hubspot/properties.ts` (`PROJECT_PROPERTIES`) are ever cached. Each portal id (e.g. `pipelineStage`) is resolved to HubSpot's actual internal property name by matching its label against the live object schema (`resolveInternalNames`), with `app_settings.propertyMap` as a manual override and `app_settings.propertyUnresolved` recording anything that still couldn't be matched (surfaced on `/admin/health`).
+4. **Apply**: the plan is applied in batches of ≤500 rows via `INSERT … ON CONFLICT DO UPDATE` into `users`, `books`, and `book_cache` (`applyPlan()`). A `sync_runs` row tracks status/counts/errors for every run kind (`incremental` / `full` / `single`).
+5. **Resumability**: a full sync (~200 pages at 20k Projects) can outrun a single Vercel function invocation. `runPagedSync` stops after a time budget (240s, leaving headroom under Vercel's 300s cap), persists its HubSpot pagination cursor to `app_settings` (key `hubspot:incrementalSyncCursor` / `hubspot:fullSyncCursor` — chosen because `sync_runs` has no text column for a page token), and the route handler's `after()` callback fires a best-effort self-continuation request; if that's dropped, the next scheduled cron tick resumes from the same persisted cursor. The cursor is deleted once a run finishes or hard-errors.
+6. **Read**: pages read exclusively through `src/lib/data/*` (e.g. `listBooksForUser`, `getBookForUser` in `src/lib/data/books.ts`), which join `books` + `book_cache`, resolve the current stage from `stage_config`, evaluate `action_rules`, and apply `property_display` friendly labels — all from Postgres, no HubSpot calls in the request path.
+
+## Ownership scoping
+
+**Rule**: one author sees one author's data, and every book/file/chat query is scoped by the signed-in user's id inside `src/lib/data/*` — never in page or route code directly.
+
+Where it lives:
+- `src/lib/data/books.ts` — every exported function takes a `userId` and scopes its query with it (e.g. `getBookForUser(userId, bookId)` does `WHERE books.id = bookId AND books.userId = userId` in one query — there is deliberately no `getBookById(id)` without a `userId` parameter). A caller can't accidentally fetch another author's book by guessing an id.
+- `src/lib/session.ts` — `requireUser()` resolves the real signed-in user; `effectiveUserId(user)` resolves the id that data functions should actually be scoped to, which is the admin's own id normally, or the target author's id when an admin is in "View as" mode (`user.viewingAs`, set via a cookie from `/admin/authors`' "View as" action). Every author-facing route calls `effectiveUserId()` and passes that into `src/lib/data/*` — never `user.id` directly — so "View as" and normal author access go through the identical scoped-query path.
+- Admin routes are the one place that legitimately reads across authors (e.g. `/admin/authors/[id]`), and they do so explicitly by passing the target author's `userId` into the same `src/lib/data/*` functions — still scoped, just to a different, deliberately chosen id, and gated by `requireAdmin()` server-side in the layout and independently in every server action.
+- File streaming (`GET /api/files/[id]`) follows the same pattern: `getVisibleFileForUser(effectiveUserId(user), id)` and a 404 (never 403) on anything not owned or not visible, so the response never confirms whether a given file id exists at all.
+
+## The single HubSpot write path
+
+Google Drive is read-only everywhere (`src/lib/drive/client.ts`'s service account is scoped to `drive.readonly` only — writes fail at the API level even if attempted). HubSpot is read-only with exactly one exception: an author updating their own phone or postal address.
+
+- `src/lib/hubspot/writes.ts` defines the allow-list (`WRITABLE_CONTACT_FIELDS`: phone, street, city, region, postalCode, country — email is deliberately excluded, since it's the login identity and the HubSpot join key), a zod schema, and pure planning logic (`planContactInfoPatch`) — no HTTP calls in this file.
+- The only two methods anywhere that actually call a HubSpot mutating endpoint are `updateContactProperties` and `updateProjectProperties` on `HubSpotApiClient` in `src/lib/hubspot/client.ts`. `src/lib/hubspot/writes.test.ts` fails the build if any other file matches those call patterns, making this a structurally enforced rule, not just a convention.
+- `src/lib/hubspot/contact-info.ts`'s `updateAuthorContactInfo(userId, input)` is the orchestration: validate with zod → throttle (5 updates per user per rolling 24h, counted from `audit_log`) → write to HubSpot first → on success, mirror the change into `book_cache` for every one of that author's books (so the portal reflects it immediately, without waiting for the next sync) → audit with a before/after snapshot (`author.contact_info.update`). A HubSpot write failure is audited separately (`author.contact_info.failed`) and surfaced to the author as a generic, safe error message.
+- Whether these fields live on the Contact or the Project in a given HubSpot portal is `app_settings.contactInfoTarget` (default `"contact"`), resolved before the write.
+
+## Auth session model
+
+Auth.js v5 (`next-auth@beta`) with the Drizzle adapter, configured for **database sessions** (`session: { strategy: "database" }` in `src/auth.ts`), specifically so an admin can revoke access by deleting rows — a JWT session can't be invalidated server-side.
+
+Two sign-in paths, one session mechanism, with one documented wrinkle:
+- **Magic link** (Resend provider): `signIn("resend", …)` goes through Auth.js's normal adapter flow end-to-end, which creates a real `sessions` row and sets the session cookie itself. `sendVerificationRequest` only actually sends the email if a user row exists and isn't disabled — otherwise it silently succeeds, so the flow never confirms account existence either way.
+- **Credentials (password)**: Auth.js's Credentials provider always issues a **JWT** session internally, even when the top-level strategy is `"database"` — confirmed by reading `@auth/core`'s callback handler, not assumed. Since the app needs revocable database sessions for password logins too, the password sign-in flow does **not** call `signIn("credentials", …)` for its actual cookie. Instead `src/lib/auth/db-session.ts` (`createDatabaseSession` + `setSessionCookie`) writes a `sessions` row and a cookie directly, using the exact cookie name and shape Auth.js's own adapter uses, so `auth()` reads it back identically regardless of which path created it. The Credentials provider is still registered in `src/auth.ts` (so `authorize()` has one shared, tested implementation — `verifyPasswordLogin` in `src/lib/auth/password.ts` — either path can call), but the actual cookie for a password login comes from `db-session.ts`, not from Auth.js's own Credentials flow.
+- Because both paths converge on the same `sessions` table shape, `forceSignOut(userId)` and `revokeAccess(userId)` (`src/lib/auth/invite.ts`, both just `DELETE FROM sessions WHERE user_id = …`) work uniformly no matter how the user signed in.
+- **Admin 2FA** is a second, independent layer on top of the session, not a session type: `src/proxy.ts` gates every `/admin` route — redirecting to `/admin/security` to enroll if `totpEnabled` is false, or to `/verify-2fa` if it's true but the request lacks a valid `ap_2fa` cookie (an HMAC of the session token + today's date, signed with `AUTH_SECRET`, checked in `src/lib/auth/cookies.ts`). This cookie expires daily by construction, not by a timer, so an admin re-verifies once per calendar day rather than once per session length.
+
+## Assistant prompt/caching design
+
+Provider-agnostic via Vercel AI SDK (`ai` + `@ai-sdk/anthropic` / `@ai-sdk/openai` / `@ai-sdk/google`), selected at runtime from `app_settings.assistant` (`getActiveModel()` in `src/lib/assistant/providers.ts`), constrained to whichever providers have an API key configured in the environment.
+
+Prompt assembly (`src/lib/assistant/prompt.ts`, pure — no db access, safe to import from the eval CLI too) builds, in order: a fixed system prompt (grounded-only answers, cite section ids in a trailing `Sources: §1.2, §4.1` line, refuse and point to the Author Manager when the handbook doesn't cover it, never speculate about the specific author's dates/money/contract terms, second person, plain and concise) → the entire active Author Handbook as one block, each section prefixed `[§id heading]` → a short per-request author context line (current stage, book title) → up to the last 10 chat turns → the new question.
+
+The **handbook block is the cache boundary**, and it's handled differently per provider because the SDK's cache-control surface differs:
+- **Anthropic**: the handbook system message carries `providerOptions.anthropic.cacheControl = { type: "ephemeral" }`, marking an explicit prompt-cache breakpoint at the end of that block. Everything before it (system prompt + handbook, the expensive, mostly-static part) is cached between requests; the per-request context/history/question after the breakpoint can vary freely without invalidating the cache.
+- **OpenAI**: no explicit action taken — the API auto-caches matching prompt prefixes over roughly 1,024 tokens on its own.
+- **Google**: `@ai-sdk/google` only exposes caching via a reference to a pre-created Gemini context-cache resource (its own separate creation call, with its own TTL/lifecycle) — that resource-management step is not implemented, so Google requests currently go out uncached. This is a known, documented gap (see the comment in `src/lib/assistant/prompt.ts`), not an oversight to rediscover.
+
+`getActiveHandbook()` itself is cached in-process for 60 seconds (`src/lib/assistant/handbook.ts`) as a separate, unrelated layer — that's about not re-querying Postgres on every chat request, distinct from the provider-side prompt caching described above. Activating a new handbook version explicitly invalidates that 60-second cache immediately rather than waiting it out.
+
+`POST /api/chat` (`src/app/api/chat/route.ts`) enforces a 40-messages-per-day cap per author (counted from `chat_messages` since UTC midnight), streams the response back with the AI SDK's UI message stream, and on completion records provider/model/latency/token usage/citations — the source both `/admin/assistant`'s log view and the eval script's cost estimates draw from.

@@ -1,0 +1,290 @@
+<title>Author Portal Setup Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&family=Roboto+Condensed:wght@400;700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #ffffff; --surface: #f6f7f8; --surface-2: #eef4f6; --line: #dfe3e6;
+    --ink: #1a1b1d; --ink-2: #3f444b; --muted: #69727d;
+    --coral: #ff8466; --coral-ink: #c4482b; --teal: #67b7cd; --teal-ink: #2a7f96; --teal-tint: #d0f2fd;
+    --ok: #3e9a6d; --warn: #d9962b;
+    --shadow: 0 1px 2px rgba(20,30,40,.06), 0 8px 24px rgba(20,30,40,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17181a; --surface: #202225; --surface-2: #232a2e; --line: #33373c;
+      --ink: #f1efea; --ink-2: #cfd3d8; --muted: #98a1ab;
+      --coral: #ff8f73; --coral-ink: #ffb7a3; --teal: #7cc6db; --teal-ink: #9ad8e8; --teal-tint: #1e3740;
+      --ok: #6fc394; --warn: #e6b04f;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17181a; --surface: #202225; --surface-2: #232a2e; --line: #33373c;
+    --ink: #f1efea; --ink-2: #cfd3d8; --muted: #98a1ab;
+    --coral: #ff8f73; --coral-ink: #ffb7a3; --teal: #7cc6db; --teal-ink: #9ad8e8; --teal-tint: #1e3740;
+    --ok: #6fc394; --warn: #e6b04f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 16px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--teal-ink); }
+  a:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
+  .page { max-width: 980px; margin: 0 auto; padding: 40px 24px 96px; }
+  .eyebrow { font-family: "Roboto Condensed", Roboto, sans-serif; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  header { padding-bottom: 24px; border-bottom: 3px solid var(--ink); margin-bottom: 36px; display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; }
+  header h1 { font-size: clamp(32px, 5vw, 48px); line-height: 1.04; font-weight: 800; margin: 8px 0 12px; letter-spacing: -.01em; text-wrap: balance; }
+  header p { margin: 0; color: var(--ink-2); font-size: 17px; max-width: 62ch; }
+  .meta { font-family: "Roboto Condensed", Roboto, sans-serif; font-size: 13px; color: var(--muted); text-align: right; display: grid; gap: 4px; }
+  .meta b { color: var(--ink); }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--coral); margin-right: 8px; vertical-align: 2px; }
+
+  h2 { font-size: 26px; font-weight: 800; margin: 0 0 6px; letter-spacing: -.005em; text-wrap: balance; }
+  h2 .n { color: var(--teal-ink); font-variant-numeric: tabular-nums; margin-right: 10px; }
+  .sub { color: var(--muted); margin: 0 0 18px; font-size: 15px; }
+  h3 { font-size: 17px; font-weight: 700; margin: 22px 0 8px; }
+  p, li { max-width: 72ch; }
+  p { margin: 0 0 12px; }
+  ol, ul { padding-left: 22px; margin: 0 0 14px; }
+  li { margin: 0 0 8px; }
+  li::marker { color: var(--coral-ink); font-weight: 700; }
+  code, .mono { font-family: "Roboto Mono", ui-monospace, Menlo, monospace; font-size: .9em; }
+  code { background: var(--surface); padding: 1px 6px; border-radius: 3px; color: var(--ink-2); }
+  pre { background: var(--surface); border-left: 3px solid var(--teal); padding: 12px 16px; border-radius: 0 6px 6px 0; overflow-x: auto; margin: 10px 0 16px; max-width: 76ch; }
+  pre code { background: none; padding: 0; color: var(--ink); font-size: 14px; }
+  section { margin: 0 0 52px; scroll-margin-top: 20px; }
+
+  .tablewrap { overflow-x: auto; margin: 8px 0 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th { text-align: left; font-family: "Roboto Condensed", Roboto, sans-serif; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 8px 12px 8px 0; border-bottom: 2px solid var(--line); }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { font-weight: 500; white-space: nowrap; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .callout { border-left: 4px solid var(--teal); background: var(--teal-tint); padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 14px 0 18px; max-width: 76ch; }
+  .callout.coral { border-left-color: var(--coral); background: color-mix(in srgb, var(--coral) 12%, var(--bg)); }
+  .callout p:last-child { margin: 0; }
+
+  /* overview grid */
+  .parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 16px 0 8px; }
+  .part { background: var(--surface); border-radius: 6px; padding: 12px 14px; display: grid; gap: 4px; align-content: start; }
+  .part .k { font-family: "Roboto Condensed", Roboto, sans-serif; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal-ink); font-weight: 700; }
+  .part b { font-size: 15px; }
+  .part span { font-size: 13.5px; color: var(--muted); }
+  .part a { text-decoration: none; color: inherit; }
+  .part:hover { box-shadow: var(--shadow); }
+
+  .pill { display: inline-block; font-family: "Roboto Condensed", Roboto, sans-serif; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 100px; font-weight: 700; }
+  .pill.demo { background: var(--teal-tint); color: var(--teal-ink); }
+  .pill.prod { background: var(--coral); color: #1a1b1d; }
+  .pill.both { background: var(--ink); color: var(--bg); }
+
+  .step { display: grid; grid-template-columns: 28px 1fr; gap: 12px; margin: 0 0 10px; max-width: 76ch; }
+  .step i { width: 28px; height: 28px; border-radius: 50%; background: var(--surface-2); color: var(--teal-ink); font-family: "Roboto Condensed", Roboto, sans-serif; font-weight: 700; font-size: 13px; display: grid; place-items: center; font-style: normal; }
+  .step div { padding-top: 3px; }
+  .hand { color: var(--muted); font-size: 14px; }
+  .yields { margin-top: 12px; padding: 10px 14px; background: var(--surface); border-radius: 6px; font-size: 14px; max-width: 76ch; }
+  .yields b { color: var(--ink-2); }
+
+  footer { border-top: 1px solid var(--line); padding-top: 16px; color: var(--muted); font-size: 13.5px; font-family: "Roboto Condensed", Roboto, sans-serif; }
+  @media (max-width: 640px) { header { grid-template-columns: 1fr; } .meta { text-align: left; } }
+</style>
+
+<div class="page">
+<header>
+  <div>
+    <div class="eyebrow"><span class="dot"></span>Atmosphere Press · Author Portal</div>
+    <h1>Setup Guide</h1>
+    <p>Every account, key, and setting you need to run the portal, in the order to create them. Two paths: the light <strong>demo</strong> with one fake author, and <strong>production</strong> against real HubSpot and Drive data.</p>
+  </div>
+  <div class="meta">
+    <div><b>For one developer</b></div>
+    <div>3 September 2026</div>
+    <div>Repo: <span class="mono">author-portal</span></div>
+  </div>
+</header>
+
+<section id="overview">
+  <h2>The parts</h2>
+  <p class="sub">Nine things. Roughly two hours end to end for production if DNS cooperates. The demo needs only the first four.</p>
+  <div class="parts">
+    <a class="part" href="#local"><span class="k">0</span><b>Your laptop</b><span>Node 22+, git, the GitHub CLI. Already there.</span><span class="pill both">both</span></a>
+    <a class="part" href="#github"><span class="k">1</span><b>GitHub</b><span>Private repo. Vercel deploys from it.</span><span class="pill both">both</span></a>
+    <a class="part" href="#neon"><span class="k">2</span><b>Neon</b><span>Postgres. Free tier for demo, Launch for prod.</span><span class="pill both">both</span></a>
+    <a class="part" href="#vercel"><span class="k">3</span><b>Vercel</b><span>Hosting, crons, env vars. Hobby for demo, Pro for prod.</span><span class="pill both">both</span></a>
+    <a class="part" href="#resend"><span class="k">4</span><b>Resend</b><span>Magic-link and reset emails. Needs DNS on your domain.</span><span class="pill prod">production</span></a>
+    <a class="part" href="#hubspot"><span class="k">5</span><b>HubSpot Private App</b><span>Read-only token plus one contact-write scope.</span><span class="pill prod">production</span></a>
+    <a class="part" href="#google"><span class="k">6</span><b>Google Cloud</b><span>Service account shared into the Drive folder.</span><span class="pill prod">production</span></a>
+    <a class="part" href="#llm"><span class="k">7</span><b>An LLM key</b><span>Anthropic, OpenAI, or Google. One is enough.</span><span class="pill demo">optional</span></a>
+    <a class="part" href="#secrets"><span class="k">8</span><b>Two secrets</b><span>Generated locally in ten seconds.</span><span class="pill both">both</span></a>
+  </div>
+  <div class="callout"><p><strong>Order matters twice.</strong> Neon before Vercel, because Vercel needs the connection string. Resend's DNS before inviting anyone, because magic links are the only way authors get in.</p></div>
+</section>
+
+<section id="local">
+  <h2><span class="n">0</span>Your laptop</h2>
+  <p class="sub">Already in place on this machine. Listed so a future you on a new machine knows what to install.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Tool</th><th>Why</th><th>Check</th></tr></thead>
+    <tbody>
+      <tr><td>Node 22 or newer</td><td>Next.js 16 and the tsx scripts</td><td><code>node -v</code></td></tr>
+      <tr><td>npm</td><td>Ships with Node</td><td><code>npm -v</code></td></tr>
+      <tr><td>git</td><td>Source control</td><td><code>git --version</code></td></tr>
+      <tr><td>GitHub CLI</td><td>Create the repo from the terminal</td><td><code>gh auth status</code></td></tr>
+      <tr><td>Vercel CLI (optional)</td><td>Pull env vars locally, inspect deploys</td><td><code>npm i -g vercel</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="github">
+  <h2><span class="n">1</span>GitHub</h2>
+  <p class="sub">The project already has a local git repo. It needs a remote.</p>
+  <div class="step"><i>1</i><div>Decide where it lives: your personal account or an Atmosphere organization. An organization is better if anyone else might ever need access. Creating one is free.</div></div>
+  <div class="step"><i>2</i><div>Create a <strong>private</strong> repository named <code>author-portal</code> and push. From the project folder:</div></div>
+<pre><code>gh repo create atmosphere-press/author-portal --private --source=. --remote=origin --push</code></pre>
+  <div class="step"><i>3</i><div>Under Settings → Branches, protect <code>main</code> with "require a pull request before merging" turned <em>off</em> for now. As the only developer you'll push directly, but keep "do not allow force pushes" on.</div></div>
+  <div class="yields"><b>You now have:</b> a remote for Vercel to deploy from. Every push to <code>main</code> becomes production; every other branch becomes a preview URL.</div>
+</section>
+
+<section id="neon">
+  <h2><span class="n">2</span>Neon (Postgres)</h2>
+  <p class="sub">Serverless Postgres. The app talks to it over HTTP, so no connection pooler to run.</p>
+  <div class="step"><i>1</i><div>Sign up at neon.tech. Free tier is fine for the demo and for the first weeks of production. Move to <strong>Launch</strong> (about $19/month) before inviting real authors, for point-in-time restore.</div></div>
+  <div class="step"><i>2</i><div>Create a project. Pick the region closest to Vercel's default (US East, Washington). Name it <code>author-portal</code>.</div></div>
+  <div class="step"><i>3</i><div>In Connection Details, choose <strong>Pooled connection</strong> and copy the string. It starts with <code>postgresql://</code> and contains <code>-pooler</code> in the host. This is <code>DATABASE_URL</code>.</div></div>
+  <div class="step"><i>4</i><div>For production only: create a second branch named <code>preview</code>. Its connection string becomes the Preview-scoped <code>DATABASE_URL</code> in Vercel so pull-request builds never touch production data.</div></div>
+  <div class="callout coral"><p><strong>Two databases, two commands.</strong> On the demo or preview branch, <code>npm run db:push</code> is fine. On production, always <code>npm run db:generate</code> then <code>npm run db:migrate</code> so every schema change is a reviewed SQL file in the repo.</p></div>
+  <div class="yields"><b>You now have:</b> <code>DATABASE_URL</code> (and a second one for preview).</div>
+</section>
+
+<section id="vercel">
+  <h2><span class="n">3</span>Vercel</h2>
+  <p class="sub">Hosting, cron jobs, and the place environment variables live.</p>
+  <div class="step"><i>1</i><div>Sign up with your GitHub account. <strong>Hobby</strong> (free) is fine for the demo. Production needs <strong>Pro</strong> ($20/month, one seat) because Hobby forbids commercial use and caps function duration below what the nightly full sync needs.</div></div>
+  <div class="step"><i>2</i><div>Add New → Project → import <code>author-portal</code>. Framework is detected as Next.js. Don't deploy yet; add environment variables first.</div></div>
+  <div class="step"><i>3</i><div>Settings → Environment Variables. Paste the values from the master table in <a href="#envvars">section 9</a>. Scope <code>DATABASE_URL</code> separately for Production and Preview.</div></div>
+  <div class="step"><i>4</i><div>Deploy. The repo's <code>vercel.json</code> registers two crons automatically: incremental sync every 10 minutes and a full reconcile at 03:15 UTC. Confirm both appear under Settings → Cron Jobs.</div></div>
+  <div class="step"><i>5</i><div>Production only: Settings → Domains → add <code>portal.atmospherepress.com</code>. Vercel shows a CNAME to add at your DNS host. Then set <code>AUTH_URL</code> to <code>https://portal.atmospherepress.com</code>.</div></div>
+  <div class="yields"><b>You now have:</b> a live URL, working crons, and a place to rotate secrets without redeploying code.</div>
+</section>
+
+<section id="resend">
+  <h2><span class="n">4</span>Resend (email)</h2>
+  <p class="sub">Sends magic links, password resets, and invites. Deliverability is the whole login path, so do the DNS properly.</p>
+  <div class="step"><i>1</i><div>Sign up at resend.com. Free tier covers 3,000 emails a month, enough for 1,000 authors. Pro ($20/month) at 20,000 authors.</div></div>
+  <div class="step"><i>2</i><div>Domains → Add Domain → <code>atmospherepress.com</code> (or a subdomain like <code>mail.atmospherepress.com</code> if you'd rather keep the root domain's DNS untouched). Resend shows DKIM and SPF records. Add them at your DNS host.</div></div>
+  <div class="step"><i>3</i><div>Add a DMARC record yourself. Resend doesn't prompt for it, but mailbox providers increasingly require it:</div></div>
+<pre><code>_dmarc.atmospherepress.com  TXT  "v=DMARC1; p=quarantine; rua=mailto:quinton@atmospherepress.com"</code></pre>
+  <div class="step"><i>4</i><div>Wait for the domain to show Verified (minutes to a few hours).</div></div>
+  <div class="step"><i>5</i><div>API Keys → Create → "Sending access" only. This is <code>RESEND_API_KEY</code>. Set <code>EMAIL_FROM</code> to an address on the verified domain, for example <code>Atmosphere Press &lt;portal@atmospherepress.com&gt;</code>.</div></div>
+  <p class="hand">For the demo you can skip Resend entirely. The seeded accounts have passwords, and Resend's sandbox mode only delivers to your own address anyway.</p>
+  <div class="yields"><b>You now have:</b> <code>RESEND_API_KEY</code>, <code>EMAIL_FROM</code>.</div>
+</section>
+
+<section id="hubspot">
+  <h2><span class="n">5</span>HubSpot Private App</h2>
+  <p class="sub">A token with read scopes plus exactly one write scope, for authors updating their own phone and address.</p>
+  <div class="step"><i>1</i><div>HubSpot → Settings → Integrations → Private Apps → Create a private app. Name it "Author Portal".</div></div>
+  <div class="step"><i>2</i><div>Scopes tab. Grant these and nothing else:</div></div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Scope</th><th>Used for</th></tr></thead>
+    <tbody>
+      <tr><td><code>crm.objects.contacts.read</code></td><td>Matching Projects to author emails</td></tr>
+      <tr><td><code>crm.objects.custom.read</code></td><td>Reading Project records</td></tr>
+      <tr><td><code>crm.schemas.custom.read</code></td><td>Discovering Project property names from their labels</td></tr>
+      <tr><td><code>crm.objects.contacts.write</code></td><td>Author self-service phone and address updates only</td></tr>
+    </tbody>
+  </table></div>
+  <div class="step"><i>3</i><div>If the phone and address fields turn out to live on the Project rather than the Contact, swap the write scope for <code>crm.objects.custom.write</code> and set <code>contactInfoTarget</code> to <code>project</code> in the portal's <code>app_settings</code>. The code handles both.</div></div>
+  <div class="step"><i>4</i><div>Create app → copy the access token. This is <code>HUBSPOT_ACCESS_TOKEN</code>. HubSpot shows it once.</div></div>
+  <div class="step"><i>5</i><div>Find the Project object's type id: Settings → Data Management → Objects → Project. The URL or the object settings shows an id like <code>2-12345678</code>. This is <code>HUBSPOT_PROJECT_OBJECT_TYPE</code>.</div></div>
+  <div class="callout"><p><strong>Property names resolve themselves.</strong> The portal reads the Project schema and matches your labels ("Pipeline Stage", "DE Assigned", and so on) to internal names automatically. Anything it can't match shows on <code>/admin/health</code> so you can map it by hand.</p></div>
+  <div class="yields"><b>You now have:</b> <code>HUBSPOT_ACCESS_TOKEN</code>, <code>HUBSPOT_PROJECT_OBJECT_TYPE</code>.</div>
+</section>
+
+<section id="google">
+  <h2><span class="n">6</span>Google Cloud service account (Drive)</h2>
+  <p class="sub">A robot Google account that staff share the author folders with. Read-only by scope.</p>
+  <div class="step"><i>1</i><div>console.cloud.google.com → create a project named <code>atmosphere-author-portal</code> (or reuse one). Enable the <strong>Google Drive API</strong> under APIs &amp; Services.</div></div>
+  <div class="step"><i>2</i><div>IAM &amp; Admin → Service Accounts → Create. Name it <code>author-portal-drive</code>. No roles needed; Drive access comes from sharing, not IAM.</div></div>
+  <div class="step"><i>3</i><div>Open the account → Keys → Add key → JSON. A file downloads. Base64-encode it on one line:</div></div>
+<pre><code>base64 -i ~/Downloads/atmosphere-author-portal-xxxx.json | tr -d '\n'</code></pre>
+  <div class="step"><i>4</i><div>That string is <code>GOOGLE_SERVICE_ACCOUNT_JSON_B64</code>. Delete the downloaded file afterwards; the key is now only in Vercel.</div></div>
+  <div class="step"><i>5</i><div>In Google Drive, open the top-level folder that contains all author folders → Share → paste the service account's email (the <code>client_email</code> in the JSON, ending in <code>iam.gserviceaccount.com</code>) as <strong>Viewer</strong>. Copy the folder id from the URL. This is <code>GOOGLE_DRIVE_ROOT_FOLDER_ID</code> and it scopes the admin folder picker.</div></div>
+  <div class="yields"><b>You now have:</b> <code>GOOGLE_SERVICE_ACCOUNT_JSON_B64</code>, <code>GOOGLE_DRIVE_ROOT_FOLDER_ID</code>.</div>
+</section>
+
+<section id="llm">
+  <h2><span class="n">7</span>An LLM provider key</h2>
+  <p class="sub">The handbook assistant works with any one of three. Unset providers simply don't appear in the admin dropdown.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Provider</th><th>Where</th><th>Env var</th><th>Start with</th></tr></thead>
+    <tbody>
+      <tr><td>Anthropic</td><td>console.anthropic.com → API Keys</td><td><code>ANTHROPIC_API_KEY</code></td><td>Recommended default. Native citations, best at "not in the handbook".</td></tr>
+      <tr><td>OpenAI</td><td>platform.openai.com → API Keys</td><td><code>OPENAI_API_KEY</code></td><td>Cheapest to set up; automatic prompt caching.</td></tr>
+      <tr><td>Google</td><td>aistudio.google.com → Get API key</td><td><code>GOOGLE_GENERATIVE_AI_API_KEY</code></td><td>Cheapest per question, but prompt caching isn't wired yet so the saving is smaller than it looks.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="step"><i>1</i><div>Create the key, and on the same screen set a <strong>monthly spend limit</strong>. $50 is a generous ceiling at 1,000 authors.</div></div>
+  <div class="step"><i>2</i><div>After deploy, pick provider and model at <code>/admin/assistant</code>, upload the handbook at <code>/admin/handbook</code>, and run the eval before making it active.</div></div>
+  <div class="yields"><b>You now have:</b> one of the three keys above.</div>
+</section>
+
+<section id="secrets">
+  <h2><span class="n">8</span>Two secrets and one email</h2>
+  <p class="sub">Generated on your machine, never reused between demo and production.</p>
+<pre><code>echo "AUTH_SECRET=$(openssl rand -base64 32)"
+echo "CRON_SECRET=$(openssl rand -hex 32)"</code></pre>
+  <ul>
+    <li><code>AUTH_SECRET</code> signs sessions and the admin two-factor cookie.</li>
+    <li><code>CRON_SECRET</code> is what Vercel Cron presents to the sync endpoint. Vercel reads it from the same env var, so setting it once is enough.</li>
+    <li><code>ADMIN_BOOTSTRAP_EMAIL</code> is your address. The seed script makes that user the first admin.</li>
+  </ul>
+</section>
+
+<section id="envvars">
+  <h2><span class="n">9</span>Environment variable master list</h2>
+  <p class="sub">What goes into Vercel (production) or <code>.env</code> (local and demo). Copy <code>.env.example</code> as the starting point.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Variable</th><th>Demo</th><th>Production</th><th>From part</th></tr></thead>
+    <tbody>
+      <tr><td><code>DATABASE_URL</code></td><td>Yes</td><td>Yes, per environment</td><td>2 Neon</td></tr>
+      <tr><td><code>AUTH_SECRET</code></td><td>Yes</td><td>Yes</td><td>8</td></tr>
+      <tr><td><code>CRON_SECRET</code></td><td>Yes</td><td>Yes</td><td>8</td></tr>
+      <tr><td><code>AUTH_URL</code></td><td>No</td><td>Yes, the portal URL</td><td>3 Vercel</td></tr>
+      <tr><td><code>DEMO_MODE</code></td><td><code>1</code></td><td>Never set</td><td></td></tr>
+      <tr><td><code>ADMIN_BOOTSTRAP_EMAIL</code></td><td>Optional</td><td>Yes, first deploy</td><td>8</td></tr>
+      <tr><td><code>RESEND_API_KEY</code>, <code>EMAIL_FROM</code></td><td>No</td><td>Yes</td><td>4 Resend</td></tr>
+      <tr><td><code>HUBSPOT_ACCESS_TOKEN</code>, <code>HUBSPOT_PROJECT_OBJECT_TYPE</code></td><td>No</td><td>Yes</td><td>5 HubSpot</td></tr>
+      <tr><td><code>GOOGLE_SERVICE_ACCOUNT_JSON_B64</code>, <code>GOOGLE_DRIVE_ROOT_FOLDER_ID</code></td><td>No</td><td>Yes</td><td>6 Google</td></tr>
+      <tr><td>One of <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, <code>GOOGLE_GENERATIVE_AI_API_KEY</code></td><td>Optional</td><td>Yes</td><td>7</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="firstrun">
+  <h2><span class="n">10</span>First run</h2>
+  <p class="sub">Once the variables are in place.</p>
+  <h3>Demo, locally</h3>
+<pre><code>cp .env.example .env      # fill DATABASE_URL, AUTH_SECRET, CRON_SECRET, DEMO_MODE=1
+npm install
+npm run db:push
+npm run db:seed -- --demo
+npm run dev</code></pre>
+  <p>Sign in at <code>localhost:3000/sign-in</code> with the password option. Demo logins are in <code>docs/DEMO.md</code>. Push the same branch to Vercel Hobby with the same four variables for a shareable preview.</p>
+
+  <h3>Production, first deploy</h3>
+<pre><code>npm run db:generate       # writes the first migration; commit it
+npm run db:migrate        # with DATABASE_URL pointing at the Neon main branch
+npm run db:seed           # creates your admin from ADMIN_BOOTSTRAP_EMAIL, default stages</code></pre>
+  <ol>
+    <li>Sign in with a magic link. Visiting <code>/admin</code> redirects you to enrol two-factor. Scan the QR with 1Password or Authy.</li>
+    <li><code>/admin/health</code> → Run full sync. Watch the sync runs table for <code>ok</code>. Fix any unmapped stage values under <code>/admin/stages</code> and unresolved properties it lists.</li>
+    <li><code>/admin/handbook</code> → upload, test a question, make active. <code>/admin/assistant</code> → pick a model.</li>
+    <li>Invite yourself as an author with a second email address and check the whole flow before inviting anyone else.</li>
+  </ol>
+  <p class="hand">The full launch checklist and every runbook live in <code>docs/DEPLOY.md</code> and <code>docs/RUNBOOKS.md</code> in the repo.</p>
+</section>
+
+<footer>Atmosphere Press · Author Portal setup guide · 3 September 2026 · Companion to docs/DEPLOY.md, docs/DEMO.md, docs/RUNBOOKS.md</footer>
+</div>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2c2440"/>
+      <stop offset="55%" stop-color="#7a4a5e"/>
+      <stop offset="100%" stop-color="#ff8466"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#sky)"/>
+  <circle cx="470" cy="180" r="70" fill="#ffe3c2" opacity="0.9"/>
+  <g fill="#1c1626" opacity="0.85">
+    <ellipse cx="120" cy="760" rx="90" ry="130"/>
+    <ellipse cx="260" cy="800" rx="110" ry="150"/>
+    <ellipse cx="420" cy="770" rx="100" ry="140"/>
+    <rect x="0" y="800" width="600" height="100"/>
+  </g>
+  <text x="300" y="360" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="54" fill="#fdf6ec">The Orchard</text>
+  <text x="300" y="425" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="54" fill="#fdf6ec">at Dusk</text>
+  <text x="300" y="470" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="22" fill="#ffe3c2">a novel</text>
+  <text x="300" y="850" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="26" fill="#fdf6ec" letter-spacing="2">MAYA OKAFOR</text>
+  <text x="300" y="890" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#fdf6ec" opacity="0.6">Demo fixture cover — Atmosphere Author Portal</text>
+</svg>
