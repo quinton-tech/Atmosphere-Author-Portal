@@ -2,6 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { getSessionToken, markTwoFactorVerified } from "@/lib/auth/db-session";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { requireAdmin } from "@/lib/session";
@@ -20,6 +21,9 @@ export async function enrollTotpAction(_prev: EnrollTotpState, formData: FormDat
   if (!ok) return { error: "That code didn't match. Check the time on your device and try again." };
 
   await db.update(users).set({ totpSecret: secret, totpEnabled: true }).where(eq(users.id, admin.id));
+  // Enrolling just proved possession of the authenticator; count it as today's verification.
+  const sessionToken = await getSessionToken();
+  if (sessionToken) await markTwoFactorVerified(sessionToken);
   await audit(admin.id, "auth.totp_enabled", { targetType: "user", targetId: admin.id });
 
   redirect("/admin");
