@@ -1,4 +1,5 @@
 import type { FileView } from "@/lib/types";
+import { Thumb } from "@/components/Thumb";
 import { EmptyState } from "./EmptyState";
 
 function shortKind(mimeType: string | null): string {
@@ -33,8 +34,7 @@ export function FileGrid({ files }: { files: FileView[] }) {
             {items.map((file) => (
               <li key={file.id} className="overflow-hidden rounded-2xl border border-line">
                 {file.thumbnailHref ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={file.thumbnailHref} alt="" className="h-32 w-full bg-surface object-cover" />
+                  <Thumb src={file.thumbnailHref} fallback={shortKind(file.mimeType)} />
                 ) : (
                   <div className="eyebrow flex h-32 w-full items-center justify-center bg-surface text-muted">
                     {shortKind(file.mimeType)}
