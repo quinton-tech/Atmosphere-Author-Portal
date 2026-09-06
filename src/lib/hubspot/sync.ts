@@ -122,15 +122,27 @@ async function loadSyncConfig(reader: HubSpotReader): Promise<{
   propertyMap: PropertyMap;
   titleProperty: string;
   unresolved: string[];
+  owners: Map<string, string>;
 }> {
-  const [schema, stageRows, propertyMapSetting, titlePropertySetting] = await Promise.all([
+  const [schema, stageRows, propertyMapSetting, titlePropertySetting, owners] = await Promise.all([
     reader.getProjectSchema(),
     db.select({ key: stageConfig.key, hubspotValues: stageConfig.hubspotValues }).from(stageConfig),
     getAppSetting<PropertyMap>("propertyMap"),
     getAppSetting<string>("titleProperty"),
+    // Owner names are optional: without the owners.read scope the team shows ids and Health flags it.
+    reader.getOwners().then(
+      async (m) => {
+        await setAppSetting("ownersUnavailable", false);
+        return m;
+      },
+      async (err: unknown) => {
+        await setAppSetting("ownersUnavailable", err instanceof Error ? err.message.slice(0, 200) : true);
+        return new Map<string, string>();
+      },
+    ),
   ]);
   const { map, unresolved } = resolveInternalNames(schema.properties, propertyMapSetting ?? {});
-  return { stages: stageRows, propertyMap: map, titleProperty: titlePropertySetting ?? "name", unresolved };
+  return { stages: stageRows, propertyMap: map, titleProperty: titlePropertySetting ?? "name", unresolved, owners };
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +212,7 @@ async function runPagedSync(kind: "incremental" | "full", opts: { maxDurationMs?
     after = undefined;
   }
 
-  const { stages, propertyMap, titleProperty, unresolved } = await loadSyncConfig(reader);
+  const { stages, propertyMap, titleProperty, unresolved, owners } = await loadSyncConfig(reader);
   const enumValuesSeenAcc: Record<string, string[]> = {};
   let done = false;
   const errors: string[] = [];
@@ -208,7 +220,7 @@ async function runPagedSync(kind: "incremental" | "full", opts: { maxDurationMs?
   try {
     for (;;) {
       if (Date.now() - budgetStart > maxDurationMs) break;
-      const { plan, nextAfter } = await fetchAndPlanPage(reader, since, after, { stages, propertyMap, titleProperty });
+      const { plan, nextAfter } = await fetchAndPlanPage(reader, since, after, { stages, propertyMap, titleProperty, owners });
       const applied = await applyPlan(plan);
       processed += plan.books.length + plan.unmatchedProjectIds.length;
       created += applied.usersUpserted;
@@ -273,9 +285,9 @@ export async function syncSingleProject(hubspotProjectId: string): Promise<{ ok:
   const project = await reader.getProject(hubspotProjectId);
   if (!project) return { ok: false, error: "This project could not be found in HubSpot." };
 
-  const { stages, propertyMap, titleProperty } = await loadSyncConfig(reader);
+  const { stages, propertyMap, titleProperty, owners } = await loadSyncConfig(reader);
   const contacts = await reader.getContactsByIds(project.contactIds);
-  const plan = planSync([project], contacts, stages, propertyMap, { titleProperty });
+  const plan = planSync([project], contacts, stages, propertyMap, { titleProperty, owners });
   await applyPlan(plan);
   await db.insert(syncRuns).values({
     kind: "single",
@@ -296,10 +308,10 @@ export async function syncAuthor(userId: string): Promise<{ ok: boolean; process
   const projects = await reader.getProjectsForContact(user.hubspotContactId);
   if (projects.length === 0) return { ok: true, processed: 0, errors: [] };
 
-  const { stages, propertyMap, titleProperty } = await loadSyncConfig(reader);
+  const { stages, propertyMap, titleProperty, owners } = await loadSyncConfig(reader);
   const contactIds = [...new Set(projects.flatMap((p) => p.contactIds))];
   const contacts = await reader.getContactsByIds(contactIds);
-  const plan = planSync(projects, contacts, stages, propertyMap, { titleProperty });
+  const plan = planSync(projects, contacts, stages, propertyMap, { titleProperty, owners });
   await applyPlan(plan);
   await db.insert(syncRuns).values({
     kind: "single",

@@ -47,13 +47,25 @@ export type SyncPlan = {
 };
 
 const ENUM_PROPERTY_IDS = new Set(PROJECT_PROPERTIES.filter((p) => p.kind === "enum").map((p) => p.id));
+const PERSON_PROPERTY_IDS = PROJECT_PROPERTIES.filter((p) => p.kind === "person").map((p) => p.id);
+
+/** Team fields hold HubSpot owner ids; swap in names when we have them, else leave the id. */
+export function resolvePersonNames(props: Record<string, string | null>, owners: Map<string, string> | undefined): Record<string, string | null> {
+  if (!owners?.size) return props;
+  const out = { ...props };
+  for (const id of PERSON_PROPERTY_IDS) {
+    const v = out[id];
+    if (v && owners.has(v)) out[id] = owners.get(v)!;
+  }
+  return out;
+}
 
 export function planSync(
   projects: HubSpotProject[],
   contacts: Map<string, HubSpotContactSummary>,
   stages: Pick<StageConfig, "key" | "hubspotValues">[],
   propertyMap: PropertyMap,
-  opts: { titleProperty?: string; stageProperty?: string } = {},
+  opts: { titleProperty?: string; stageProperty?: string; owners?: Map<string, string> } = {},
 ): SyncPlan {
   const titleProperty = opts.titleProperty ?? "name";
   const usersByEmail = new Map<string, PlannedUser>();
@@ -63,7 +75,7 @@ export function planSync(
   const enumValuesSeen: Record<string, Set<string>> = {};
 
   for (const project of projects) {
-    const portalProps = pickPortalProperties(project.properties, propertyMap);
+    const portalProps = resolvePersonNames(pickPortalProperties(project.properties, propertyMap), opts.owners);
 
     for (const id of ENUM_PROPERTY_IDS) {
       const v = portalProps[id];
@@ -102,11 +114,11 @@ export async function fetchAndPlanPage(
   reader: HubSpotReader,
   since: Date | null,
   after: string | undefined,
-  config: { stages: Pick<StageConfig, "key" | "hubspotValues">[]; propertyMap: PropertyMap; titleProperty: string },
+  config: { stages: Pick<StageConfig, "key" | "hubspotValues">[]; propertyMap: PropertyMap; titleProperty: string; owners?: Map<string, string> },
 ): Promise<{ plan: SyncPlan; nextAfter?: string }> {
   const page = await reader.searchProjectsModifiedSince(since, after);
   const contactIds = [...new Set(page.results.flatMap((p) => p.contactIds))];
   const contacts = await reader.getContactsByIds(contactIds);
-  const plan = planSync(page.results, contacts, config.stages, config.propertyMap, { titleProperty: config.titleProperty });
+  const plan = planSync(page.results, contacts, config.stages, config.propertyMap, { titleProperty: config.titleProperty, owners: config.owners });
   return { plan, nextAfter: page.nextAfter };
 }

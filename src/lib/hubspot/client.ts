@@ -49,6 +49,12 @@ export interface HubSpotReader {
    * Assumes an author has a small (single-digit) number of books, so no pagination.
    */
   getProjectsForContact(contactId: string): Promise<HubSpotProject[]>;
+  /**
+   * HubSpot owner id -> display name, active and archived owners alike (former staff still appear
+   * on old Projects). Team properties (BPM, DE, PR, …) reference owners, so the sync stores names.
+   * Needs the `crm.objects.owners.read` scope; callers treat a failure as "no names available".
+   */
+  getOwners(): Promise<Map<string, string>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +202,23 @@ class HubSpotApiClient implements HubSpotReader, HubSpotContactWriter {
     const projectIds = res.results[0]?.to.map((t) => t.toObjectId) ?? [];
     const projects = await Promise.all(projectIds.map((id) => this.getProject(id)));
     return projects.filter((p): p is HubSpotProject => p !== null);
+  }
+
+  async getOwners(): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    for (const archived of [false, true]) {
+      let after: string | undefined;
+      do {
+        const res = await withRetry(() => this.client.crm.owners.ownersApi.getPage(undefined, after, 500, archived));
+        for (const o of res.results) {
+          const name = [o.firstName, o.lastName].filter(Boolean).join(" ").trim() || o.email || String(o.id);
+          out.set(String(o.id), name);
+          if (o.userId != null) out.set(String(o.userId), name);
+        }
+        after = res.paging?.next?.after;
+      } while (after);
+    }
+    return out;
   }
 
   async getContactsByIds(ids: string[]): Promise<Map<string, HubSpotContactSummary>> {
