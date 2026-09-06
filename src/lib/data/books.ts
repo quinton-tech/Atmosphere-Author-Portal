@@ -155,6 +155,11 @@ export async function getBookForUser(
       isFuture: m.state === "scheduled",
     }));
 
+  // Authors see done / in-progress / scheduled milestones anywhere, but "pending" ones only for
+  // stages they've reached — a book in Interior Design shouldn't list every future publicity item.
+  const reachedStageKeys = new Set(pipelineViews.filter((s) => s.state !== "upcoming").map((s) => s.key));
+  const visibleMilestones = milestones.filter((m) => m.state !== "pending" || reachedStageKeys.has(m.stageKey));
+
   const derivedViews = computeDerivedStages(
     derivedRows.map((s) => ({
       key: s.key,
@@ -165,7 +170,7 @@ export async function getBookForUser(
       showWhenEmpty: s.showWhenEmpty,
       milestoneIds: s.derivedMilestoneIds,
     })),
-    milestones,
+    milestones: visibleMilestones,
     pipelineViews,
   );
   const stageViews = [...pipelineViews, ...derivedViews].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -181,7 +186,7 @@ export async function getBookForUser(
     currentStage,
     timeline: buildTimeline(props, stages, currentKey, labels, now, milestoneEvents),
     team: buildTeam(props, labels),
-    milestones,
+    milestones: visibleMilestones,
     website: buildWebsite(book.id, props, websiteOverrides, labels),
     package: friendly("package", props.package, labels),
     teaser: cleanTeaser(props.teaser),
