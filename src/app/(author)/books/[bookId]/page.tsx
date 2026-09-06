@@ -4,11 +4,13 @@ import { ActionList } from "@/components/ActionList";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { BookHeader } from "@/components/BookHeader";
 import { LastUpdated } from "@/components/LastUpdated";
+import { MilestoneList } from "@/components/MilestoneList";
 import { NotesList } from "@/components/NotesList";
 import { StageNow } from "@/components/StageNow";
-import { TeamList } from "@/components/TeamList";
+import { TeamListWithDirectory } from "@/components/TeamList";
 import { Timeline } from "@/components/Timeline";
 import { TypicalPath } from "@/components/TypicalPath";
+import { WebsiteCard } from "@/components/WebsiteCard";
 import { getBookForUser } from "@/lib/data/books";
 import { effectiveUserId, requireUser } from "@/lib/session";
 
@@ -55,11 +57,13 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
         <div className="mt-5">
           <Timeline events={book.timeline} />
         </div>
-        <TypicalPath stages={book.stages} />
+        <TypicalPath stages={book.stages} milestones={book.milestones} />
       </section>
 
       <StageNow stage={book.currentStage} />
-      <TeamList team={book.team} />
+      <MilestoneList milestones={book.milestones} />
+      {book.website && <WebsiteCard website={book.website} />}
+      <TeamListWithDirectory team={book.team} />
       <NotesList notes={book.notes} />
       <LastUpdated syncedAt={book.syncedAt} />
 

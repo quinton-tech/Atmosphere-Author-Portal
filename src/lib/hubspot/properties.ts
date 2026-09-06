@@ -23,8 +23,20 @@ export const PROJECT_PROPERTIES: PortalProperty[] = [
   { id: "pipelineStage", label: "Pipeline Stage", kind: "enum", group: "production", friendly: "Current stage" },
   { id: "initiationDate", label: "Initiation Date", kind: "date", group: "production", friendly: "Project started" },
   { id: "package", label: "Package", kind: "enum", group: "production" },
+  // Multi-select checkbox property; HubSpot stores selected values joined by ";" (e.g.
+  // "Hardcover;Cold Reading"). Cached raw so milestone include-rules can check membership.
+  { id: "serviceAddOns", label: "Service Add-ons", kind: "enum", group: "production" },
   { id: "teaser", label: "Description/Teaser Final", kind: "text", group: "production", friendly: "Your book's teaser" },
   { id: "publicationDate", label: "Publication Date (Claire-only)", kind: "date", group: "production", friendly: "Publication date" },
+
+  // Author website. The "* " on the real HubSpot label is part of the label itself (not a
+  // markdown/required-field marker we're stripping), so `internalName` is set explicitly rather
+  // than relying on label matching for this one property.
+  { id: "websiteUrl", label: "* Author Website URL", kind: "text", group: "production", internalName: "website_url" },
+  { id: "websiteStatus", label: "AW Production Status", kind: "enum", group: "production" },
+  { id: "websitePackage", label: "AW Package (maintaining)", kind: "enum", group: "production" },
+  { id: "websiteDomainExpiry", label: "AW Domain Expiration Date", kind: "date", group: "production" },
+  { id: "websiteDomain", label: "AW Final Domain", kind: "text", group: "production" },
 
   // Team (person + assigned date + status triples)
   { id: "bpm", label: "BPM", kind: "person", group: "team", friendly: "Book Production Manager" },

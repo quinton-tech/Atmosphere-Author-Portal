@@ -29,6 +29,9 @@ const stageSchema = z.object({
   sortOrder: z.coerce.number().int().default(0),
   typicalWeeks: z.union([z.coerce.number().int().positive(), z.literal("")]).optional(),
   isTerminal: z.literal("on").optional(),
+  kind: z.enum(["pipeline", "derived"]).default("pipeline"),
+  parentStageKey: z.string().trim().max(64).optional().default(""),
+  showWhenEmpty: z.literal("on").optional(),
 });
 
 export async function upsertStageAction(formData: FormData): Promise<void> {
@@ -40,41 +43,58 @@ export async function upsertStageAction(formData: FormData): Promise<void> {
     sortOrder: formData.get("sortOrder"),
     typicalWeeks: formData.get("typicalWeeks") || "",
     isTerminal: formData.get("isTerminal") ?? undefined,
+    kind: formData.get("kind") || "pipeline",
+    parentStageKey: formData.get("parentStageKey") || "",
+    showWhenEmpty: formData.get("showWhenEmpty") ?? undefined,
   });
   if (!parsed.success) redirectWithFlash(LIST_PATH, "error", parsed.error.issues[0]?.message ?? "Invalid stage.");
 
   await runAction(
     LIST_PATH,
     async () => {
-      const hubspotValues = parseHubspotValues(formData.get("hubspotValues"));
-      const typicalWeeks = parsed.data!.typicalWeeks === "" || parsed.data!.typicalWeeks == null ? null : Number(parsed.data!.typicalWeeks);
-      const existing = await db.select().from(stageConfig).where(eq(stageConfig.key, parsed.data!.key)).limit(1);
+      const d = parsed.data!;
+      const isDerived = d.kind === "derived";
+      // A pipeline row's HubSpot mapping; a derived row's driving milestones. Never both — the
+      // other column keeps its default/empty value for the row's actual kind.
+      const hubspotValues = isDerived ? [] : parseHubspotValues(formData.get("hubspotValues"));
+      const derivedMilestoneIds = isDerived ? formData.getAll("derivedMilestoneIds").map(String).filter(Boolean) : [];
+      const parentStageKey = isDerived && d.parentStageKey ? d.parentStageKey : null;
+      const typicalWeeks = d.typicalWeeks === "" || d.typicalWeeks == null ? null : Number(d.typicalWeeks);
+      const existing = await db.select().from(stageConfig).where(eq(stageConfig.key, d.key)).limit(1);
       await db
         .insert(stageConfig)
         .values({
-          key: parsed.data!.key,
-          label: parsed.data!.label,
-          description: parsed.data!.description ?? "",
+          key: d.key,
+          label: d.label,
+          description: d.description ?? "",
           hubspotValues,
-          sortOrder: parsed.data!.sortOrder,
+          sortOrder: d.sortOrder,
           typicalWeeks,
-          isTerminal: !!parsed.data!.isTerminal,
+          isTerminal: !!d.isTerminal,
+          kind: d.kind,
+          derivedMilestoneIds,
+          parentStageKey,
+          showWhenEmpty: !isDerived || !!d.showWhenEmpty,
         })
         .onConflictDoUpdate({
           target: stageConfig.key,
           set: {
-            label: parsed.data!.label,
-            description: parsed.data!.description ?? "",
+            label: d.label,
+            description: d.description ?? "",
             hubspotValues,
-            sortOrder: parsed.data!.sortOrder,
+            sortOrder: d.sortOrder,
             typicalWeeks,
-            isTerminal: !!parsed.data!.isTerminal,
+            isTerminal: !!d.isTerminal,
+            kind: d.kind,
+            derivedMilestoneIds,
+            parentStageKey,
+            showWhenEmpty: !isDerived || !!d.showWhenEmpty,
             updatedAt: new Date(),
           },
         });
       await audit(admin.id, "admin.stage_config.update", {
         targetType: "stage_config",
-        targetId: parsed.data!.key,
+        targetId: d.key,
         meta: { action: existing.length ? "update" : "create" },
       });
     },

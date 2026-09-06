@@ -20,6 +20,19 @@ export const syncKindEnum = pgEnum("sync_kind", ["incremental", "full", "single"
 export const syncStatusEnum = pgEnum("sync_status", ["running", "ok", "error"]);
 export const ruleOperatorEnum = pgEnum("rule_operator", ["eq", "neq", "in", "not_in", "empty", "not_empty"]);
 
+// ---------- Milestones (sub-stage) ----------
+
+export type MilestoneKind = "status" | "date" | "flag";
+
+/** Same operators as action_rules' `ruleOperatorEnum`, plus "contains" for ";"-joined multi-selects. */
+export type MilestoneRuleOperator = "eq" | "neq" | "in" | "not_in" | "empty" | "not_empty" | "contains";
+
+export type MilestoneIncludeRule = {
+  packages?: string[];
+  addOns?: string[];
+  property?: { name: string; operator: MilestoneRuleOperator; value?: string | string[] };
+} | null;
+
 // ---------- Identity ----------
 
 export const users = pgTable(
@@ -134,16 +147,32 @@ export const bookCache = pgTable(
 
 // ---------- Admin-editable configuration ----------
 
+export type StageKind = "pipeline" | "derived";
+
 /** Maps raw HubSpot stage values to what authors see. */
 export const stageConfig = pgTable("stage_config", {
   key: text("key").primaryKey(),
   label: text("label").notNull(),
   description: text("description").notNull().default(""),
-  /** Raw HubSpot property values that map to this stage. */
+  /** Raw HubSpot property values that map to this stage. Ignored for "derived" rows. */
   hubspotValues: jsonb("hubspot_values").$type<string[]>().notNull().default([]),
   sortOrder: integer("sort_order").notNull().default(0),
   typicalWeeks: integer("typical_weeks"),
   isTerminal: boolean("is_terminal").notNull().default(false),
+  /**
+   * "pipeline" (default) rows come from the real HubSpot Pipeline Stage dropdown via
+   * `hubspotValues`/`resolveStageKey`. "derived" rows have no HubSpot mapping — their state is
+   * computed from `derivedMilestoneIds` instead (see src/lib/hubspot/derived-stages.ts). This lets
+   * the portal show a finer-grained "typical path" than HubSpot's own pipeline without ever writing
+   * back to HubSpot.
+   */
+  kind: text("kind").$type<StageKind>().notNull().default("pipeline"),
+  /** stage_milestones ids whose combined state drives a "derived" row. Ignored for "pipeline" rows. */
+  derivedMilestoneIds: jsonb("derived_milestone_ids").$type<string[]>().notNull().default([]),
+  /** Which pipeline stage a derived row is grouped/ordered under. Null for pipeline rows. */
+  parentStageKey: text("parent_stage_key"),
+  /** false = omit a derived row entirely when none of its milestones are included/present. */
+  showWhenEmpty: boolean("show_when_empty").notNull().default(true),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
 
@@ -175,6 +204,43 @@ export const propertyDisplay = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("property_display_idx").on(t.propertyId, t.rawValue)],
+);
+
+/**
+ * Sub-stage checkpoints within a `stage_config` stage (e.g. "Cold read", "Premier review",
+ * "NetGalley") driven by one raw HubSpot property. Not every author gets every milestone —
+ * `includeRule` gates which ones apply, but a milestone with an actual (non-hidden) value always
+ * shows regardless of the rule (data wins). See `src/lib/hubspot/milestones.ts` for evaluation.
+ */
+export const stageMilestones = pgTable(
+  "stage_milestones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stageKey: text("stage_key")
+      .notNull()
+      .references(() => stageConfig.key, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    description: text("description").notNull().default(""),
+    /** Raw HubSpot internal property name (not a portal id) driving this milestone's state. */
+    propertyName: text("property_name").notNull(),
+    kind: text("kind").$type<MilestoneKind>().notNull().default("status"),
+    /** Status values (case-insensitive) meaning "done". */
+    doneValues: jsonb("done_values").$type<string[]>().notNull().default([]),
+    /** Values meaning "not happening" — the milestone is omitted entirely. */
+    hiddenValues: jsonb("hidden_values").$type<string[]>().notNull().default([]),
+    /** Values meaning "in progress"; when null, any non-empty non-done value counts as in progress. */
+    inProgressValues: jsonb("in_progress_values").$type<string[] | null>(),
+    linkProperty: text("link_property"),
+    dateProperty: text("date_property"),
+    /** Its value is appended to the label, e.g. "Premier review · Kirkus". */
+    venueProperty: text("venue_property"),
+    /** Null = shown to everyone. Otherwise included if ANY listed condition matches. */
+    includeRule: jsonb("include_rule").$type<MilestoneIncludeRule>(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("stage_milestones_stage_idx").on(t.stageKey)],
 );
 
 export const appSettings = pgTable("app_settings", {
@@ -296,9 +362,15 @@ export type User = typeof users.$inferSelect;
 export type Book = typeof books.$inferSelect;
 export type BookCache = typeof bookCache.$inferSelect;
 export type StageConfig = typeof stageConfig.$inferSelect;
+export type StageMilestone = typeof stageMilestones.$inferSelect;
 export type ActionRule = typeof actionRules.$inferSelect;
 export type PropertyDisplay = typeof propertyDisplay.$inferSelect;
 export type VisibleFile = typeof visibleFiles.$inferSelect;
 export type Note = typeof notes.$inferSelect;
 export type HandbookVersion = typeof handbookVersions.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+
+// Feature tables kept in their own files; re-exported here so `@/db/schema` stays the single import.
+export * from "./schema-team";
+export * from "./schema-uploads";
+export * from "./schema-comms";

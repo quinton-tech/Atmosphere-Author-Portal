@@ -16,6 +16,14 @@ const schema = z.object({
   GOOGLE_SERVICE_ACCOUNT_JSON_B64: z.string().optional(),
   GOOGLE_DRIVE_ROOT_FOLDER_ID: z.string().optional(),
 
+  // --- Author uploads (write-scoped, separate from the read-only Drive account) ---
+  // A second Google service account, granted only the `drive.file` scope (it can see/write only
+  // files/folders it created itself). See src/lib/drive/uploads.ts, the one module allowed to
+  // call a Drive write method. All optional: uploads are simply unavailable until configured.
+  GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64: z.string().optional(),
+  GOOGLE_UPLOADS_ROOT_FOLDER_ID: z.string().optional(),
+  UPLOADS_NOTIFY_EMAIL: z.string().email().optional(),
+
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
@@ -92,4 +100,10 @@ export function configuredProviders(): Array<"anthropic" | "openai" | "google"> 
  *  swaps in the fixture DriveReader (`src/lib/drive/fixture.ts`). See docs/DEMO.md. */
 export function isDemoMode(): boolean {
   return env.DEMO_MODE === "1" || env.DEMO_MODE === "true";
+}
+
+/** True when the write-scoped uploads service account is configured. Gates `/uploads` for real
+ *  Drive writes (see `src/lib/drive/uploads.ts`); in demo mode uploads work without this. */
+export function isUploadsConfigured(): boolean {
+  return !!env.GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64 && !!env.GOOGLE_UPLOADS_ROOT_FOLDER_ID;
 }

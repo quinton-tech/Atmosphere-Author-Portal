@@ -65,7 +65,7 @@ export function planSync(
   contacts: Map<string, HubSpotContactSummary>,
   stages: Pick<StageConfig, "key" | "hubspotValues">[],
   propertyMap: PropertyMap,
-  opts: { titleProperty?: string; stageProperty?: string; owners?: Map<string, string> } = {},
+  opts: { titleProperty?: string; stageProperty?: string; owners?: Map<string, string>; extraProperties?: string[] } = {},
 ): SyncPlan {
   const titleProperty = opts.titleProperty ?? "name";
   const usersByEmail = new Map<string, PlannedUser>();
@@ -76,6 +76,12 @@ export function planSync(
 
   for (const project of projects) {
     const portalProps = resolvePersonNames(pickPortalProperties(project.properties, propertyMap), opts.owners);
+
+    // Milestone-driving properties reference raw HubSpot internal names, not portal ids. Cache them
+    // namespaced under "hs:<internalName>" so they can never collide with a portal id.
+    for (const internalName of opts.extraProperties ?? []) {
+      portalProps[`hs:${internalName}`] = project.properties[internalName] ?? null;
+    }
 
     for (const id of ENUM_PROPERTY_IDS) {
       const v = portalProps[id];
@@ -114,11 +120,21 @@ export async function fetchAndPlanPage(
   reader: HubSpotReader,
   since: Date | null,
   after: string | undefined,
-  config: { stages: Pick<StageConfig, "key" | "hubspotValues">[]; propertyMap: PropertyMap; titleProperty: string; owners?: Map<string, string> },
+  config: {
+    stages: Pick<StageConfig, "key" | "hubspotValues">[];
+    propertyMap: PropertyMap;
+    titleProperty: string;
+    owners?: Map<string, string>;
+    extraProperties?: string[];
+  },
 ): Promise<{ plan: SyncPlan; nextAfter?: string }> {
   const page = await reader.searchProjectsModifiedSince(since, after);
   const contactIds = [...new Set(page.results.flatMap((p) => p.contactIds))];
   const contacts = await reader.getContactsByIds(contactIds);
-  const plan = planSync(page.results, contacts, config.stages, config.propertyMap, { titleProperty: config.titleProperty, owners: config.owners });
+  const plan = planSync(page.results, contacts, config.stages, config.propertyMap, {
+    titleProperty: config.titleProperty,
+    owners: config.owners,
+    extraProperties: config.extraProperties,
+  });
   return { plan, nextAfter: page.nextAfter };
 }

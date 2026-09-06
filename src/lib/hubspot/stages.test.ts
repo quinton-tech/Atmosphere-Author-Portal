@@ -20,6 +20,15 @@ describe("resolveStageKey", () => {
     expect(resolveStageKey({ stage: "Unknown" }, stages, "stage")).toBeNull();
     expect(resolveStageKey({}, stages, "stage")).toBeNull();
   });
+  it("ignores derived rows, even when one would otherwise match first", () => {
+    const withDerivedFirst = [
+      { key: "cover_design", hubspotValues: ["Cover"], kind: "derived" as const },
+      { key: "editorial", hubspotValues: ["Editing", "In Edit"] },
+    ];
+    // Without the derived-row guard this would incorrectly match the first (derived) row by key.
+    expect(resolveStageKey({ stage: "cover" }, withDerivedFirst, "stage")).toBeNull();
+    expect(resolveStageKey({ stage: "cover_design" }, withDerivedFirst, "stage")).toBeNull();
+  });
 });
 
 function rule(over: Partial<ActionRule>): ActionRule {

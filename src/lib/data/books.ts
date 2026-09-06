@@ -1,11 +1,65 @@
 import "server-only";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { actionRules, bookCache, books, notes, propertyDisplay, stageConfig, visibleFiles } from "@/db/schema";
-import type { AuthorInfo, BookDetail, BookSummary, StageView } from "@/lib/types";
+import { actionRules, appSettings, bookCache, books, notes, propertyDisplay, stageConfig, stageMilestones, visibleFiles } from "@/db/schema";
+import type { AuthorInfo, BookDetail, BookSummary, StageView, TimelineEvent, WebsiteView } from "@/lib/types";
+import { computeDerivedStages } from "@/lib/hubspot/derived-stages";
 import { evaluateActionRules } from "@/lib/hubspot/rules";
+import { evaluateMilestones } from "@/lib/hubspot/milestones";
 import { resolveStageKey } from "@/lib/hubspot/stages";
 import { buildTeam, buildTimeline, cleanTeaser, friendly, parseDate, type DisplayLabels } from "@/lib/hubspot/timeline";
+
+const BLUEHOST_HOSTING_URL = "https://my.bluehost.com";
+
+/** Author website "AW Production Status" -> author-facing status line. Unlisted/future values fall back to friendly(). */
+const WEBSITE_STATUS_COPY: Record<string, string> = {
+  Building: "Your site is being built",
+  "Initial Review Sent": "Ready for your review",
+  "Sent to Author additional time": "Ready for your review",
+  "Author Review": "Ready for your review",
+  Maintaining: "Live and maintained",
+  Expired: "Domain expired",
+};
+
+function normalizeWebsiteUrl(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+/** `<origin-of-url>/wp-admin/`, or null if `url` isn't a parseable absolute URL. */
+function deriveWpAdminUrl(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    return new URL("/wp-admin/", url).toString();
+  } catch {
+    return null;
+  }
+}
+
+async function loadWebsiteEditOverrides(): Promise<Record<string, string>> {
+  const [row] = await db.select().from(appSettings).where(eq(appSettings.key, "websiteEditOverrides")).limit(1);
+  return (row?.value as Record<string, string> | undefined) ?? {};
+}
+
+function buildWebsite(
+  bookId: string,
+  props: Record<string, string | null>,
+  overrides: Record<string, string>,
+  labels: DisplayLabels,
+): WebsiteView | null {
+  if (!props.websiteUrl && !props.websiteDomain && !props.websiteStatus) return null;
+  const url = normalizeWebsiteUrl(props.websiteUrl);
+  const rawStatus = props.websiteStatus?.trim() ?? null;
+  return {
+    url,
+    editUrl: overrides[bookId] ?? deriveWpAdminUrl(url),
+    hostingUrl: BLUEHOST_HOSTING_URL,
+    status: (rawStatus && WEBSITE_STATUS_COPY[rawStatus]) || friendly("websiteStatus", props.websiteStatus, labels),
+    packageName: friendly("websitePackage", props.websitePackage, labels),
+    domainExpiry: parseDate(props.websiteDomainExpiry)?.toISOString() ?? null,
+  };
+}
 
 /**
  * All data access for books is scoped by userId. There is deliberately no
@@ -55,7 +109,7 @@ export async function getBookForUser(
   if (!row) return null;
   const { book, cache } = row;
 
-  const [stages, rules, files, noteRows, labels] = await Promise.all([
+  const [stages, rules, files, noteRows, labels, milestoneRows, websiteOverrides] = await Promise.all([
     db.select().from(stageConfig).orderBy(asc(stageConfig.sortOrder)),
     db.select().from(actionRules).where(eq(actionRules.enabled, true)).orderBy(asc(actionRules.sortOrder)),
     db.select().from(visibleFiles).where(eq(visibleFiles.bookId, book.id)).orderBy(asc(visibleFiles.sortOrder)),
@@ -65,21 +119,56 @@ export async function getBookForUser(
       .where(and(eq(notes.bookId, book.id), eq(notes.visibleToAuthor, true)))
       .orderBy(desc(notes.createdAt)),
     loadDisplayLabels(),
+    db.select().from(stageMilestones).where(eq(stageMilestones.enabled, true)).orderBy(asc(stageMilestones.sortOrder)),
+    loadWebsiteEditOverrides(),
   ]);
 
   const props = cache?.properties ?? {};
+  const pipelineRows = stages.filter((s) => s.kind !== "derived");
+  const derivedRows = stages.filter((s) => s.kind === "derived");
+
   const currentKey = cache?.stageKey ?? resolveStageKey(props, stages);
-  const currentIdx = stages.findIndex((s) => s.key === currentKey);
-  const stageViews: StageView[] = stages.map((s, i) => ({
+  const pipelineIdx = pipelineRows.findIndex((s) => s.key === currentKey);
+  const pipelineViews: StageView[] = pipelineRows.map((s, i) => ({
     key: s.key,
     label: s.label,
     description: s.description,
     sortOrder: s.sortOrder,
     typicalWeeks: s.typicalWeeks,
     isTerminal: s.isTerminal,
-    state: currentIdx === -1 ? "upcoming" : i < currentIdx ? "done" : i === currentIdx ? "current" : "upcoming",
+    kind: "pipeline",
+    isDerived: false,
+    state: pipelineIdx === -1 ? "upcoming" : i < pipelineIdx ? "done" : i === pipelineIdx ? "current" : "upcoming",
   }));
-  const currentStage = stageViews.find((s) => s.state === "current") ?? null;
+  const currentStage = pipelineViews.find((s) => s.state === "current") ?? null;
+
+  const now = new Date();
+  const milestones = evaluateMilestones(props, milestoneRows, stages, labels, now);
+  const milestoneEvents: TimelineEvent[] = milestones
+    .filter((m) => m.at && (m.state === "done" || m.state === "scheduled"))
+    .map((m) => ({
+      id: `milestone-${m.id}`,
+      at: m.at!,
+      title: m.label,
+      detail: m.detail,
+      kind: "milestone",
+      isFuture: m.state === "scheduled",
+    }));
+
+  const derivedViews = computeDerivedStages(
+    derivedRows.map((s) => ({
+      key: s.key,
+      label: s.label,
+      description: s.description,
+      sortOrder: s.sortOrder,
+      parentStageKey: s.parentStageKey,
+      showWhenEmpty: s.showWhenEmpty,
+      milestoneIds: s.derivedMilestoneIds,
+    })),
+    milestones,
+    pipelineViews,
+  );
+  const stageViews = [...pipelineViews, ...derivedViews].sort((a, b) => a.sortOrder - b.sortOrder);
 
   return {
     id: book.id,
@@ -90,8 +179,10 @@ export async function getBookForUser(
     updatedAt: (cache?.hubspotUpdatedAt ?? book.updatedAt).toISOString(),
     stages: stageViews,
     currentStage,
-    timeline: buildTimeline(props, stages, currentKey, labels),
+    timeline: buildTimeline(props, stages, currentKey, labels, now, milestoneEvents),
     team: buildTeam(props, labels),
+    milestones,
+    website: buildWebsite(book.id, props, websiteOverrides, labels),
     package: friendly("package", props.package, labels),
     teaser: cleanTeaser(props.teaser),
     initiationDate: parseDate(props.initiationDate)?.toISOString() ?? null,

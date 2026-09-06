@@ -5,7 +5,7 @@
 Author-facing portal for Atmosphere Press. Authors sign in and see where their book is in production, what they need to do (payments, manuscripts), curated files from Google Drive, and can ask a grounded assistant questions about the Author Handbook. Staff use `/admin`.
 
 **Hard rules**
-- Google Drive is READ ONLY. HubSpot is READ ONLY with **one exception**: an author may update their own contact details (phone, postal address) via `src/lib/hubspot/writes.ts`. That file and the concrete client are the only places allowed to call a HubSpot mutating method; `writes.test.ts` fails the build otherwise. Email is never self-service (it is the login identity and the HubSpot join key). Every contact update is throttled (5/day/user), validated with zod, written to HubSpot first, then mirrored into the cache, and audited with before/after.
+- Google Drive is READ ONLY, with **one exception**: authors may send files to their team (manuscripts, signed forms) via `/uploads`, which writes to Drive only through `src/lib/drive/uploads.ts`, using a SEPARATE service account credential scoped to `drive.file` (it can only see/write files and folders it created itself — never the read-only tree `src/lib/drive/client.ts` reads from). No other file may call a Drive mutating method; `src/lib/drive/uploads.guard.test.ts` fails the build otherwise. HubSpot is READ ONLY with **one exception**: an author may update their own contact details (phone, postal address) via `src/lib/hubspot/writes.ts`. That file and the concrete client are the only places allowed to call a HubSpot mutating method; `writes.test.ts` fails the build otherwise. Email is never self-service (it is the login identity and the HubSpot join key). Every contact update is throttled (5/day/user), validated with zod, written to HubSpot first, then mirrored into the cache, and audited with before/after. Every author upload is throttled (20/day/user), validated (type + size + magic bytes), recorded in `author_uploads`, audited, and emailed to `UPLOADS_NOTIFY_EMAIL` — see `src/lib/data/uploads.ts`.
 - One author sees one author's data. Every book/file/chat query is scoped by the signed-in user's id inside `src/lib/data/*`, never in page code. No route may accept a book id without an ownership check via those helpers.
 - Secrets live in env vars only (`src/lib/env.ts` validates them). Nothing vendor-specific reaches the client bundle.
 - Admin routes check `role === "admin"` server-side on every request, in addition to `src/proxy.ts`.
@@ -34,14 +34,14 @@ Author-facing portal for Atmosphere Press. Authors sign in and see where their b
 ## Layout
 ```
 src/app/(auth)/…        sign-in, magic link, reset password
-src/app/(author)/…      dashboard, files, account, assistant
+src/app/(author)/…      dashboard, files, account, uploads, assistant
 src/app/admin/…         staff panel
 src/app/api/…           route handlers (cron, files proxy, chat, auth)
 src/db/                 schema, client, seed, migrations
 src/lib/env.ts          zod-validated env
-src/lib/data/           ownership-scoped data access (the ONLY place pages read books/files/chat)
+src/lib/data/           ownership-scoped data access (the ONLY place pages read books/files/chat/uploads)
 src/lib/hubspot/        client + sync + stage/action mapping
-src/lib/drive/          client + file streaming
+src/lib/drive/          read-only client + file streaming; uploads.ts is the one write exception
 src/lib/assistant/      providers, handbook ingest, prompt, eval
 src/lib/audit.ts        audit log helper
 src/components/         UI (hand-built; no component library)

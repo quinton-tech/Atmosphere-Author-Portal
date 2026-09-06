@@ -1,8 +1,9 @@
 "use server";
 
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { notes } from "@/db/schema";
+import { appSettings, notes } from "@/db/schema";
 import { requireAdmin } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { redirectWithFlash, runAction } from "../../_lib/flash";
@@ -75,6 +76,43 @@ export async function linkFolderAction(userId: string, bookId: string, folderId:
       await linkFolder(bid, folderId);
     },
     "Drive folder linked.",
+  );
+}
+
+/**
+ * Admin override for a book's "Edit your site" link, when the derived `<origin>/wp-admin/` guess
+ * (see src/lib/data/books.ts's buildWebsite) is wrong — e.g. a custom admin path or a site not on
+ * WordPress. Stored in app_settings.websiteEditOverrides as { [bookId]: url }, never in HubSpot.
+ */
+export async function setWebsiteEditOverrideAction(userId: string, bookId: string, formData: FormData): Promise<void> {
+  const admin = await requireAdmin();
+  const uid = uuid.parse(userId);
+  const bid = uuid.parse(bookId);
+  await assertBookBelongsToAuthor(uid, bid);
+
+  const raw = String(formData.get("editUrl") ?? "").trim();
+  const parsed = z
+    .union([z.literal(""), z.string().trim().url().refine((v) => /^https:\/\//i.test(v), "Must be an https URL.")])
+    .safeParse(raw);
+  if (!parsed.success) redirectWithFlash(detailPath(uid, bid), "error", parsed.error.issues[0]?.message ?? "Invalid URL.");
+
+  await runAction(
+    detailPath(uid, bid),
+    async () => {
+      const [row] = await db.select().from(appSettings).where(eq(appSettings.key, "websiteEditOverrides")).limit(1);
+      const current = (row?.value as Record<string, string> | undefined) ?? {};
+      const next = { ...current };
+      if (parsed.data) next[bid] = parsed.data;
+      else delete next[bid];
+
+      await db
+        .insert(appSettings)
+        .values({ key: "websiteEditOverrides", value: next, updatedAt: new Date() })
+        .onConflictDoUpdate({ target: appSettings.key, set: { value: next, updatedAt: new Date() } });
+
+      await audit(admin.id, "admin.book.website_override", { targetType: "book", targetId: bid, meta: { editUrl: parsed.data || null } });
+    },
+    "Website edit URL updated.",
   );
 }
 

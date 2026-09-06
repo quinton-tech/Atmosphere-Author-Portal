@@ -74,6 +74,38 @@ export async function sendMagicLinkEmail(to: string, url: string): Promise<void>
   });
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Staff-facing notification for a new author upload (src/lib/data/uploads.ts). Not part of the
+ * auth flow, but reuses this file's `shell()` since it's the only on-brand transactional-email
+ * template in the codebase. Skipped entirely when RESEND_API_KEY or UPLOADS_NOTIFY_EMAIL is
+ * unset — see `isUploadsConfigured` callers upstream.
+ */
+export async function sendUploadNotificationEmail(
+  to: string,
+  info: { authorName: string; bookTitle: string | null; fileName: string; sizeBytes: number; driveWebViewLink: string | null },
+): Promise<void> {
+  const bookLine = info.bookTitle ? ` for <strong>${info.bookTitle}</strong>` : "";
+  const ctaUrl = info.driveWebViewLink ?? "https://drive.google.com/drive/my-drive";
+  await client().emails.send({
+    from: env.EMAIL_FROM,
+    to,
+    subject: `New upload from ${info.authorName}`,
+    html: shell({
+      preheader: `${info.authorName} sent a file${info.bookTitle ? ` for ${info.bookTitle}` : ""}.`,
+      heading: "New author upload",
+      body: `<strong>${info.authorName}</strong> sent a file${bookLine} through the portal:<br /><br />${info.fileName} (${formatBytes(info.sizeBytes)})`,
+      ctaLabel: "Open in Drive",
+      ctaUrl,
+    }),
+    text: `${info.authorName} sent a file${info.bookTitle ? ` for ${info.bookTitle}` : ""}: ${info.fileName} (${formatBytes(info.sizeBytes)})\n${ctaUrl}`,
+  });
+}
+
 export async function sendPasswordResetEmail(to: string, url: string): Promise<void> {
   await client().emails.send({
     from: env.EMAIL_FROM,

@@ -13,6 +13,12 @@ export function SiteHeader({ books }: { books: BookSummary[] }) {
         </Link>
         <nav className="flex items-center gap-4">
           <BookSwitcher books={books} />
+          <Link href="/messages" className="text-sm font-semibold text-ink-2 hover:text-ink">
+            Messages
+          </Link>
+          <Link href="/uploads" className="text-sm font-semibold text-ink-2 hover:text-ink">
+            Uploads
+          </Link>
           <Link href="/account" className="text-sm font-semibold text-ink-2 hover:text-ink">
             Account
           </Link>

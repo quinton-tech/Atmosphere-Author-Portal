@@ -49,6 +49,19 @@ describe("planSync", () => {
     expect(plan.users[0].name).toBeNull();
   });
 
+  it("caches extraProperties (milestone-driving raw HubSpot properties) namespaced as hs:<name>", () => {
+    const projects: HubSpotProject[] = [
+      project({ id: "p1", contactIds: ["c1"], properties: { name: "Book One", cold_read_status: "Completed" } }),
+    ];
+    const contacts = new Map<string, HubSpotContactSummary>([["c1", { id: "c1", email: "a@b.com", firstname: null, lastname: null }]]);
+
+    const plan = planSync(projects, contacts, [], {}, { titleProperty: "name", extraProperties: ["cold_read_status", "missing_property"] });
+
+    const cache = plan.caches.find((c) => c.hubspotProjectId === "p1");
+    expect(cache?.properties["hs:cold_read_status"]).toBe("Completed");
+    expect(cache?.properties["hs:missing_property"]).toBeNull();
+  });
+
   it("defaults the title property to \"name\" when not configured", () => {
     const projects: HubSpotProject[] = [project({ id: "p1", contactIds: ["c1"], properties: { name: "My Book" } })];
     const contacts = new Map<string, HubSpotContactSummary>([["c1", { id: "c1", email: "a@b.com", firstname: "A", lastname: null }]]);

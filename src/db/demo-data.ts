@@ -62,6 +62,7 @@ export function demoBook1Properties(now: Date = new Date()): Record<string, stri
   return {
     pipelineStage: "interior_design",
     package: "Premium",
+    serviceAddOns: "Cold Reading;Hardcover",
     initiationDate: monthsAgo(8, now),
     teaser:
       "When Adaeze returns to her grandmother's failing orchard after a decade away, she means to sell it and leave before the blossoms turn. Instead she finds a town that never stopped waiting for her.",
@@ -96,6 +97,13 @@ export function demoBook1Properties(now: Date = new Date()): Record<string, stri
     // Not a listed portal property (see src/lib/hubspot/properties.ts) — action_rules can key off
     // any cached property name, not just the ones the sync pipeline pre-declares.
     payment_status: "installment_due",
+
+    // Milestone-driving raw HubSpot properties, namespaced "hs:<internalName>" the same way the
+    // real sync pipeline caches them (see planSync's extraProperties handling) — makes the demo
+    // "Cold read" and "NetGalley" milestones show something on /books/[bookId].
+    "hs:cold_read_status": "Completed",
+    "hs:netgalley": "Active",
+    "hs:netgalley_start_date": weeksAgo(2, now),
   };
 }
 

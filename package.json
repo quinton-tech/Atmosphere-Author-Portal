@@ -15,7 +15,8 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx --conditions=react-server --env-file=.env src/db/seed.ts",
     "sync:hubspot": "tsx --conditions=react-server --env-file=.env src/lib/hubspot/run-sync.ts",
-    "assistant:eval": "tsx --conditions=react-server --env-file=.env src/lib/assistant/eval/run.ts"
+    "assistant:eval": "tsx --conditions=react-server --env-file=.env src/lib/assistant/eval/run.ts",
+    "team:import": "tsx --conditions=react-server --env-file=.env src/lib/team/run-import.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.49",

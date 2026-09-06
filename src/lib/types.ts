@@ -10,6 +10,9 @@ export type StageView = {
   sortOrder: number;
   typicalWeeks: number | null;
   isTerminal: boolean;
+  /** "pipeline" rows come from HubSpot's Pipeline Stage; "derived" rows are computed from milestones. */
+  kind: "pipeline" | "derived";
+  isDerived: boolean;
   /** "done" | "current" | "upcoming" relative to the book's current stage */
   state: "done" | "current" | "upcoming";
 };
@@ -64,6 +67,30 @@ export type TimelineEvent = {
   isFuture: boolean;
 };
 
+export type MilestoneView = {
+  id: string;
+  stageKey: string;
+  stageLabel: string;
+  label: string;
+  description: string;
+  kind: "status" | "date" | "flag";
+  state: "done" | "in_progress" | "scheduled" | "pending";
+  detail: string | null;
+  at: string | null; // ISO
+  href: string | null;
+};
+
+export type WebsiteView = {
+  /** Author-facing site URL, normalised to https. */
+  url: string | null;
+  /** wp-admin URL, either derived from `url` or an admin override. */
+  editUrl: string | null;
+  hostingUrl: string;
+  status: string | null;
+  packageName: string | null;
+  domainExpiry: string | null; // ISO
+};
+
 export type AuthorInfo = {
   phone: string | null;
   email: string | null;
@@ -81,6 +108,9 @@ export type BookDetail = BookSummary & {
   /** Event-based timeline derived from dated HubSpot properties. This is the primary visual. */
   timeline: TimelineEvent[];
   team: TeamMember[];
+  milestones: MilestoneView[];
+  /** Null unless the author has a website in progress (websiteUrl, websiteDomain, or websiteStatus set). */
+  website: WebsiteView | null;
   package: string | null;
   teaser: string | null;
   initiationDate: string | null; // ISO

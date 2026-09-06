@@ -25,6 +25,9 @@ Set these in Vercel (Project → Settings → Environment Variables), scoped to 
 | `HUBSPOT_PROJECT_OBJECT_TYPE` | Yes (for sync) | The Project custom object's type id or fully-qualified name from HubSpot, e.g. `2-12345678` or `p_project` |
 | `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | Yes (for Drive) | Base64 of the service-account JSON key, see §5 |
 | `GOOGLE_DRIVE_ROOT_FOLDER_ID` | Recommended | The Drive folder id staff work under; scopes the admin folder picker (see §4) |
+| `GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64` | No (optional feature) | A SECOND, distinct service account's JSON key, base64-encoded — see §10 |
+| `GOOGLE_UPLOADS_ROOT_FOLDER_ID` | No (optional feature) | Drive folder shared as Editor with the uploads service account — see §10 |
+| `UPLOADS_NOTIFY_EMAIL` | No (optional feature) | Staff inbox emailed on every author upload — see §10 |
 | `ANTHROPIC_API_KEY` | One of these three | Anthropic Console → API Keys |
 | `OPENAI_API_KEY` | One of these three | OpenAI dashboard → API Keys |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | One of these three | Google AI Studio → API Keys |
@@ -126,7 +129,16 @@ There is no admin UI to promote or demote a user's role after the first bootstra
 
 Every additional admin you create must enroll TOTP the same way on their first `/admin` visit — there's no way to skip it.
 
-## 9. Verifying crons in the Vercel dashboard
+## 9. Messages (optional)
+
+"Messages from your team" (`/messages`) shows an author the emails your team has sent them and their replies, read-only from HubSpot Engagement Emails logged on their Contact record (`src/lib/hubspot/engagements.ts`, `src/lib/data/messages.ts`).
+
+1. Add the **`sales-email-read`** scope to the same HubSpot Private App from §3 (Settings → Integrations → Private Apps → your app → Scopes). No new environment variable is needed — it reuses `HUBSPOT_ACCESS_TOKEN`.
+2. Only emails an Atmosphere staff member has actually logged to HubSpot appear — nothing is invented, and notes/calls/tasks/meetings are never shown, only the `emails` engagement type.
+3. An author's messages refresh from HubSpot at most once every 10 minutes (per author, on-demand when they visit `/messages`), not on a cron schedule — there's nothing to add to `vercel.json` for this.
+4. If the token is missing `sales-email-read`, HubSpot returns 403 and the page shows "Messages aren't available yet" instead of an error; `/admin/messages` lists every author's last sync error so a missing scope is easy to spot (it shows up as the same error across every row).
+
+## 10. Verifying crons in the Vercel dashboard
 
 1. Deploy with `vercel.json` present — it declares two crons hitting `/api/cron/sync?kind=incremental` and `?kind=full`. **The committed schedules are once-daily (`30 3 * * *` and `15 3 * * *`) because Vercel Hobby only allows daily crons.** On Pro, change the incremental schedule to `*/10 * * * *` so stage changes reach authors within ten minutes; until then the admin "Run incremental sync" button on `/admin/health` is the fast path.
 2. In the Vercel dashboard: Project → Settings → Cron Jobs should list both, showing next scheduled run.
@@ -136,6 +148,18 @@ Every additional admin you create must enroll TOTP the same way on their first `
    ```bash
    npm run sync:hubspot -- --kind=full
    ```
+
+## 10. Author uploads (optional)
+
+Lets authors send files (manuscripts, signed forms) to their team from `/uploads`. This is the one approved exception to "Drive is read-only" (see CLAUDE.md) — it writes through a SECOND, separate service account, distinct from the read-only one in §4, so a compromised or misconfigured uploads credential can never touch the read-only Drive tree the rest of the app serves from.
+
+1. In Google Cloud Console, create a second Service Account (or reuse the project from §4, but a distinct account) and a JSON key for it, same as §4 steps 1-3.
+2. Base64-encode it and set `GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64` — note this is a **different** env var from `GOOGLE_SERVICE_ACCOUNT_JSON_B64`; do not reuse the same key for both.
+3. Create (or choose) an empty Drive folder to be the uploads root, and share it with this service account's `client_email` as **Editor** (not Viewer — it needs to create subfolders and files). Set its id as `GOOGLE_UPLOADS_ROOT_FOLDER_ID`.
+4. `src/lib/drive/uploads.ts` requests only the `drive.file` scope, so even with Editor access on the shared folder, this credential can only see files/folders it created itself — it can never list or read anything else in Drive, including the folder tree from §4. `src/lib/drive/uploads.guard.test.ts` fails the build if any other file tries to call a Drive write method.
+5. Set `UPLOADS_NOTIFY_EMAIL` to the staff inbox that should get an email (via Resend, so `RESEND_API_KEY` from §5 must also be set) every time an author sends a file.
+6. All three vars are optional — if unset, `/uploads` shows a friendly "not set up yet" message instead of erroring. In demo mode (`DEMO_MODE=1`), uploads work end-to-end without any of this configured: the file is recorded with `status: "demo"` and Drive is never called.
+7. Staff review incoming files at `/admin/uploads`.
 
 ## Launch checklist
 
@@ -153,3 +177,4 @@ Every additional admin you create must enroll TOTP the same way on their first `
 - [ ] Handbook uploaded and made active at `/admin/handbook`
 - [ ] Assistant provider/model chosen at `/admin/assistant`
 - [ ] A real author invited end-to-end (magic link arrives, dashboard shows their book) before wider rollout
+- [ ] (Optional) Author uploads: second service account created, uploads root folder shared with it as Editor, `GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64` / `GOOGLE_UPLOADS_ROOT_FOLDER_ID` / `UPLOADS_NOTIFY_EMAIL` set — see §10

@@ -63,8 +63,9 @@ export function buildTimeline(
   currentStageKey: string | null,
   labels: DisplayLabels,
   now: Date = new Date(),
+  extraEvents: TimelineEvent[] = [],
 ): TimelineEvent[] {
-  const events: TimelineEvent[] = [];
+  const events: TimelineEvent[] = [...extraEvents];
   const push = (id: string, at: Date | null, title: string, detail: string | null, kind: TimelineEvent["kind"]) => {
     if (!at) return;
     events.push({ id, at: at.toISOString(), title, detail, kind, isFuture: at.getTime() > now.getTime() });

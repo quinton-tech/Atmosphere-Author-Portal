@@ -2,8 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getBookForUser, listBooksForUser } from "@/lib/data/books";
 import { getAuthorSummary } from "../queries";
-import { getBookRowForAuthor, listNotesForBook } from "./queries";
-import { refreshFromHubspotAction } from "./actions";
+import { getBookRowForAuthor, getWebsiteEditOverride, listNotesForBook } from "./queries";
+import { refreshFromHubspotAction, setWebsiteEditOverrideAction } from "./actions";
 import { PageHeader, Badge, FormError, FormSuccess, PillButton, PillLink, Card } from "../../_components/ui";
 import { fmtDateTime, relativeTime } from "../../_lib/format";
 import { PropertiesTable } from "./PropertiesTable";
@@ -28,6 +28,7 @@ export default async function AuthorDetailPage({
     ? await Promise.all([getBookForUser(id, selectedBookId, { includeProperties: true }), getBookRowForAuthor(id, selectedBookId)])
     : [null, null];
   const noteRows = selectedBookId ? await listNotesForBook(selectedBookId) : [];
+  const websiteEditOverride = selectedBookId ? await getWebsiteEditOverride(selectedBookId) : null;
 
   return (
     <div>
@@ -104,6 +105,34 @@ export default async function AuthorDetailPage({
                 <h2 className="eyebrow mb-2">Google Drive</h2>
                 <DrivePanel userId={id} bookId={book.id} driveFolderId={bookRow?.driveFolderId ?? null} searchQuery={sp.driveQuery} />
               </section>
+
+              {book.website ? (
+                <section>
+                  <h2 className="eyebrow mb-2">Author website</h2>
+                  <Card>
+                    <p className="mb-3 text-sm text-ink-2">
+                      The &ldquo;Edit your site&rdquo; link normally guesses <code>&lt;site origin&gt;/wp-admin/</code> from the
+                      website URL. Set an override here if that guess is wrong for this book.
+                    </p>
+                    <form action={setWebsiteEditOverrideAction.bind(null, id, book.id)} className="flex flex-wrap items-end gap-2">
+                      <div className="flex flex-1 min-w-[260px] flex-col gap-1">
+                        <label htmlFor="editUrl" className="eyebrow">
+                          Website edit URL override
+                        </label>
+                        <input
+                          id="editUrl"
+                          name="editUrl"
+                          type="url"
+                          placeholder="https://example.com/wp-admin/"
+                          defaultValue={websiteEditOverride ?? ""}
+                          className="rounded-md border border-line bg-bg px-3 py-1.5 text-sm text-ink"
+                        />
+                      </div>
+                      <PillButton variant="solid">Save</PillButton>
+                    </form>
+                  </Card>
+                </section>
+              ) : null}
             </div>
           ) : null}
         </>
