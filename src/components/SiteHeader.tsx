@@ -21,6 +21,7 @@ export function SiteHeader({
         </Link>
         <nav className="flex items-center gap-4">
           <BookSwitcher books={books} rememberedBookId={rememberedBookId} />
+          <NavLink href="/files">Files</NavLink>
           <NavLink href="/messages">Messages</NavLink>
           <NavLink href="/uploads">Uploads</NavLink>
           <NavLink href="/account">Account</NavLink>

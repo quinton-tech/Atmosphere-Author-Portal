@@ -17,6 +17,17 @@ export const DEMO_AUTHOR_PASSWORD = "demo-author-pass-123";
 export const DEMO_AUTHOR_NAME = "Maya Okafor";
 export const DEMO_AUTHOR_HUBSPOT_CONTACT_ID = "demo-contact-1";
 
+/**
+ * The demo author's own Drive folder, under the (fixture) master folder — see CLAUDE.md's
+ * master-folder-per-author model. Distinct from `DEMO_FOLDER_ID` (`src/lib/drive/fixture.ts`),
+ * which is book 1's own subfolder inside this one.
+ *
+ * NOTE FOR LEAD: this is only meaningful once `users.driveFolderId` exists (added by the
+ * data-layer work building `src/lib/data/files.ts`) and `FixtureDriveReader` knows to serve it —
+ * see the TODO next to `linkDemoAuthorFolder` in `seed-demo.ts`.
+ */
+export const DEMO_AUTHOR_FOLDER_ID = "demo-author-folder";
+
 // ---------------------------------------------------------------------------
 // Date helpers — approximate (30-day months), which is fine for fixture data. HubSpot date
 // properties arrive as epoch-ms strings (see `parseDate` in `src/lib/hubspot/timeline.ts`), so
@@ -169,13 +180,14 @@ export const DEMO_ACTION_RULE = {
 };
 
 // ---------------------------------------------------------------------------
-// visible_files — book 1 only, pointing at the fixture Drive files served by
-// src/lib/drive/fixture.ts.
+// visible_files — now an *overrides* table (CLAUDE.md): the author sees their whole Drive
+// folder by default, and a row here only relabels/recategorizes or hides a file. Book 1's two
+// fixture files (`src/lib/drive/fixture.ts`) are visible with their own names/inferred category
+// with no row at all; this seeds one override to demonstrate a staff relabel.
 // ---------------------------------------------------------------------------
 
-export const DEMO_VISIBLE_FILES: Array<{ driveFileId: string; label: string; category: string; mimeType: string }> = [
-  { driveFileId: "demo-cover", label: "Final cover", category: "Cover", mimeType: "image/svg+xml" },
-  { driveFileId: "demo-blurb", label: "Back-cover blurb", category: "Blurb", mimeType: "application/pdf" },
+export const DEMO_FILE_OVERRIDES: Array<{ driveFileId: string; label: string; category?: string; mimeType?: string }> = [
+  { driveFileId: "demo-cover", label: "Final cover" },
 ];
 
 // ---------------------------------------------------------------------------

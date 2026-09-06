@@ -54,6 +54,7 @@ describe("planSync", () => {
         region: null,
         postalCode: null,
         country: null,
+        driveFolderId: null,
       },
     ]);
     expect(plan.books.map((b) => b.hubspotProjectId)).toEqual(["p1", "p2"]);
@@ -125,6 +126,54 @@ describe("planSync", () => {
       region: "TX",
       postalCode: "78701",
       country: "USA",
+    });
+  });
+
+  describe("driveFolderId (parsed from driveFolderUrl / gd_link_sync)", () => {
+    const driveMap = { driveFolderUrl: "gd_link_sync" };
+
+    it("parses the folder id off the author's Project and puts it on PlannedUser", () => {
+      const projects: HubSpotProject[] = [
+        project({ id: "p1", contactIds: ["c1"], properties: { name: "Book One", gd_link_sync: "https://drive.google.com/drive/folders/abc123folder" } }),
+      ];
+      const contacts = new Map<string, HubSpotContactSummary>([["c1", contact({ id: "c1", email: "a@b.com" })]]);
+
+      const plan = planSync(projects, contacts, [], driveMap);
+
+      expect(plan.users[0].driveFolderId).toBe("abc123folder");
+    });
+
+    it("takes the first non-null folder id across all of an author's Projects", () => {
+      const projects: HubSpotProject[] = [
+        project({ id: "p1", contactIds: ["c1"], properties: { name: "Book One" } }), // no link on this one
+        project({ id: "p2", contactIds: ["c1"], properties: { name: "Book Two", gd_link_sync: "https://drive.google.com/drive/folders/second-book-folder" } }),
+      ];
+      const contacts = new Map<string, HubSpotContactSummary>([["c1", contact({ id: "c1", email: "a@b.com" })]]);
+
+      const plan = planSync(projects, contacts, [], driveMap);
+
+      expect(plan.users[0].driveFolderId).toBe("second-book-folder");
+    });
+
+    it("keeps the first folder id seen rather than overwriting it with a later one", () => {
+      const projects: HubSpotProject[] = [
+        project({ id: "p1", contactIds: ["c1"], properties: { name: "Book One", gd_link_sync: "https://drive.google.com/drive/folders/first-folder" } }),
+        project({ id: "p2", contactIds: ["c1"], properties: { name: "Book Two", gd_link_sync: "https://drive.google.com/drive/folders/second-folder" } }),
+      ];
+      const contacts = new Map<string, HubSpotContactSummary>([["c1", contact({ id: "c1", email: "a@b.com" })]]);
+
+      const plan = planSync(projects, contacts, [], driveMap);
+
+      expect(plan.users[0].driveFolderId).toBe("first-folder");
+    });
+
+    it("is null when no Project has the property set", () => {
+      const projects: HubSpotProject[] = [project({ id: "p1", contactIds: ["c1"], properties: { name: "Book One" } })];
+      const contacts = new Map<string, HubSpotContactSummary>([["c1", contact({ id: "c1", email: "a@b.com" })]]);
+
+      const plan = planSync(projects, contacts, [], driveMap);
+
+      expect(plan.users[0].driveFolderId).toBeNull();
     });
   });
 });

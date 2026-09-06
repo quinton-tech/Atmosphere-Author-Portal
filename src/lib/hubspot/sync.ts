@@ -70,6 +70,7 @@ async function applyPlan(plan: SyncPlan): Promise<{ usersUpserted: number; books
           region: u.region,
           postalCode: u.postalCode,
           country: u.country,
+          driveFolderId: u.driveFolderId,
           profileSyncedAt,
         })),
       )
@@ -84,6 +85,10 @@ async function applyPlan(plan: SyncPlan): Promise<{ usersUpserted: number; books
           region: sqlExcluded("region"),
           postalCode: sqlExcluded("postal_code"),
           country: sqlExcluded("country"),
+          // Only a non-null planned value ever replaces what's already on the row. About half of
+          // Projects don't have gd_link_sync set, and a re-sync must never wipe a value staff set
+          // by hand (or that a previous sync from a different Project already discovered).
+          driveFolderId: sql`COALESCE(excluded.drive_folder_id, ${users.driveFolderId})`,
           profileSyncedAt: sqlExcluded("profile_synced_at"),
           updatedAt: new Date(),
         },

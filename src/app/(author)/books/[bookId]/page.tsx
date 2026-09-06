@@ -49,7 +49,7 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
       <div className="flex flex-wrap items-start justify-between gap-6">
         <BookHeader book={book} />
         <Link
-          href={`/books/${book.id}/files`}
+          href={`/files#book-${book.id}`}
           className="rounded-full border border-line px-5 py-2 text-sm font-semibold text-ink"
         >
           View files
@@ -61,6 +61,7 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
       {isTerminalStage && (
         <PublishedSummary
           bookId={book.id}
+          amazonUrl={book.amazonUrl}
           milestones={book.milestones}
           website={book.website}
           suggestedQuestions={suggestedQuestions}

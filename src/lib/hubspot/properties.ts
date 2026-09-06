@@ -28,6 +28,9 @@ export const PROJECT_PROPERTIES: PortalProperty[] = [
   { id: "serviceAddOns", label: "Service Add-ons", kind: "enum", group: "production" },
   { id: "teaser", label: "Description/Teaser Final", kind: "text", group: "production", friendly: "Your book's teaser" },
   { id: "publicationDate", label: "Publication Date (Claire-only)", kind: "date", group: "production", friendly: "Publication date" },
+  /** The author's Google Drive folder URL. One master folder → author folder → book subfolders. */
+  { id: "driveFolderUrl", label: "GD Link (Sync)", kind: "text", group: "production", internalName: "gd_link_sync" },
+  { id: "amazonUrl", label: "Amazon Link", kind: "text", group: "production", internalName: "amazon_link" },
   // HubSpot's own record-creation timestamp. Used only to detect "date entered <stage>" values that
   // are migration artifacts (the record was bulk-imported into HubSpot, not actually entering that
   // stage that day) — see sanitiseStageEnteredAt in data/books.ts.

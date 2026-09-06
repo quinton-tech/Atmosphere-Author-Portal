@@ -118,7 +118,14 @@ export default async function AuthorDetailPage({
 
               <section>
                 <h2 className="eyebrow mb-2">Google Drive</h2>
-                <DrivePanel userId={id} bookId={book.id} driveFolderId={bookRow?.driveFolderId ?? null} searchQuery={sp.driveQuery} />
+                <DrivePanel
+                  userId={id}
+                  fallbackBookId={book.id}
+                  fallbackBookTitle={book.title}
+                  bookIds={bookSummaries.map((b) => b.id)}
+                  driveFolderId={bookRow?.driveFolderId ?? null}
+                  searchQuery={sp.driveQuery}
+                />
               </section>
 
               {book.website ? (

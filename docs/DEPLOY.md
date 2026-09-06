@@ -66,7 +66,9 @@ Rotating this token later is covered in `docs/RUNBOOKS.md`.
 
 ## 4. Google Cloud service account (Drive)
 
-1. In Google Cloud Console, create (or reuse) a project, then create a Service Account (IAM & Admin → Service Accounts).
+**The folder model is one master folder, shared once.** Under it: one subfolder per author, and — only for an author with more than one book — one sub-subfolder per book inside their author folder. There's no per-book folder tree to maintain by hand; staff link a book to a specific subfolder only when the automatic name match needs an override (see `src/app/admin/authors/[id]/DrivePanel.tsx`). An author sees everything in their own subfolder by default; staff hide or relabel/recategorize individual files from that same panel rather than opting files in one at a time.
+
+1. In Google Cloud Console, create (or reuse) a project, then create a Service Account (IAM & Admin → Service Accounts). This is the **read-only** account — keep it distinct from the uploads service account in §11, even though (per below) they now point at the same master folder.
 2. Create a JSON key for that service account and download it.
 3. Base64-encode the whole JSON file and set it as `GOOGLE_SERVICE_ACCOUNT_JSON_B64`:
 
@@ -74,8 +76,9 @@ Rotating this token later is covered in `docs/RUNBOOKS.md`.
    base64 -i service-account.json | tr -d '\n'
    ```
 
-4. In Google Drive, share the root folder that contains all author folders with the service account's email address (the `client_email` field in the JSON key — looks like `something@project-id.iam.gserviceaccount.com`). Viewer access is enough; `src/lib/drive/client.ts` requests only the `drive.readonly` scope, so nothing in this app can write to Drive even if broader access were granted.
-5. Set `GOOGLE_DRIVE_ROOT_FOLDER_ID` to that shared root folder's id (the last path segment of its Drive URL). The admin folder picker (`src/app/admin/authors/[id]/DrivePanel.tsx`) scopes its search to this folder; if unset, it searches everything the service account can see.
+4. In Google Drive, create (or choose) the master folder — the one containing every author's subfolder. Share it with this service account's email address (the `client_email` field in the JSON key — looks like `something@project-id.iam.gserviceaccount.com`) as **Viewer**. `src/lib/drive/client.ts` requests only the `drive.readonly` scope, so nothing in this app can write to Drive through this account even if broader access were granted.
+5. Also share the same master folder with the **uploads** service account's `client_email` (§11) as **Editor**, so an author's sent files can land inside their own subfolder rather than a disconnected tree. That account uses the full `drive` scope (writing into a folder it did not create is not possible under `drive.file`), so its reach is bounded by sharing alone: share it on the master folder and nothing else. The portal only ever calls it from `src/lib/drive/uploads.ts`, which a guard test enforces. See §11 for the rest of that account's setup.
+6. Set `GOOGLE_DRIVE_ROOT_FOLDER_ID` to the master folder's id (the last path segment of its Drive URL). The admin folder picker (`src/app/admin/authors/[id]/DrivePanel.tsx`) scopes its search to this folder; if unset, it searches everything the service account can see.
 
 ## 5. Resend (email)
 
@@ -159,8 +162,8 @@ Lets authors send files (manuscripts, signed forms) to their team from `/uploads
 
 1. In Google Cloud Console, create a second Service Account (or reuse the project from §4, but a distinct account) and a JSON key for it, same as §4 steps 1-3.
 2. Base64-encode it and set `GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64` — note this is a **different** env var from `GOOGLE_SERVICE_ACCOUNT_JSON_B64`; do not reuse the same key for both.
-3. Create (or choose) an empty Drive folder to be the uploads root, and share it with this service account's `client_email` as **Editor** (not Viewer — it needs to create subfolders and files). Set its id as `GOOGLE_UPLOADS_ROOT_FOLDER_ID`. The handbook flow creates its own "Handbook" subfolder under this same root.
-4. `src/lib/drive/uploads.ts` requests only the `drive.file` scope, so even with Editor access on the shared folder, this credential can only see files/folders it created itself — it can never list or read anything else in Drive, including the folder tree from §4. `src/lib/drive/uploads.guard.test.ts` fails the build if any other file tries to call a Drive write method (including a raw `fetch()` to Drive's upload endpoint).
+3. Share a Drive folder with this service account's `client_email` as **Editor** (not Viewer — it needs to create subfolders and files), and set its id as `GOOGLE_UPLOADS_ROOT_FOLDER_ID`. This can be the same master folder from §4 step 5 — an author's uploads then land inside their own subfolder alongside everything else staff and the author already see there — or a separate, disconnected folder if you'd rather keep uploads out of the curated tree entirely. Either way, the handbook flow creates its own "Handbook" subfolder under whichever root you set here.
+4. `src/lib/drive/uploads.ts` uses the `drive` scope so it can create files inside the author's own folder; its reach is bounded by what it is shared on (the master folder only). `src/lib/drive/uploads.guard.test.ts` fails the build if any other file tries to call a Drive write method (including a raw `fetch()` to Drive's upload endpoint).
 5. Set `UPLOADS_NOTIFY_EMAIL` to the staff inbox that should get an email (via Resend, so `RESEND_API_KEY` from §5 must also be set) every time an author sends a file.
 6. All three vars are optional — if unset: `/uploads` shows a friendly "not set up yet" message instead of erroring, and `/admin/handbook` falls back to a plain `<form>` upload capped at 4MB (Vercel's hard function limit) with a notice pointing back here. In demo mode (`DEMO_MODE=1`), author uploads work end-to-end without any of this configured: the file is recorded with `status: "demo"` and Drive is never called — no bytes are sent anywhere, not even to this app's own server.
 7. Staff review incoming files at `/admin/uploads`.
@@ -173,7 +176,7 @@ Lets authors send files (manuscripts, signed forms) to their team from `/uploads
 - [ ] `AUTH_SECRET` and `CRON_SECRET` generated and set (not the `.env.example` placeholders)
 - [ ] `AUTH_URL` set to the real production URL
 - [ ] HubSpot Private App created with exactly the scopes in §3; `HUBSPOT_ACCESS_TOKEN` and `HUBSPOT_PROJECT_OBJECT_TYPE` set
-- [ ] Google service account created, Drive root folder shared with its `client_email`; `GOOGLE_SERVICE_ACCOUNT_JSON_B64` set
+- [ ] Google service account created, master Drive folder shared with its `client_email` as Viewer; `GOOGLE_SERVICE_ACCOUNT_JSON_B64` set
 - [ ] Resend domain verified (DKIM + DMARC); `RESEND_API_KEY` and `EMAIL_FROM` set
 - [ ] At least one assistant provider API key set
 - [ ] `ADMIN_BOOTSTRAP_EMAIL` set, `npm run db:seed` run against production

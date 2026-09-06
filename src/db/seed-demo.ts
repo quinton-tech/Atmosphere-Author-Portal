@@ -11,7 +11,7 @@
 import "server-only";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   actionRules,
@@ -33,16 +33,17 @@ import {
   DEMO_ADMIN_EMAIL,
   DEMO_ADMIN_PASSWORD,
   DEMO_AUTHOR_EMAIL,
+  DEMO_AUTHOR_FOLDER_ID,
   DEMO_AUTHOR_HUBSPOT_CONTACT_ID,
   DEMO_AUTHOR_NAME,
   DEMO_AUTHOR_PASSWORD,
   DEMO_BOOK_1,
   DEMO_BOOK_2,
+  DEMO_FILE_OVERRIDES,
   DEMO_HANDBOOK_FILENAME,
   DEMO_NOTE_BODY,
   DEMO_PROPERTY_DISPLAY,
   DEMO_STAGE_HUBSPOT_VALUES,
-  DEMO_VISIBLE_FILES,
   demoBook1Properties,
   demoBook2Properties,
 } from "./demo-data";
@@ -145,17 +146,47 @@ async function upsertActionRule(rule: typeof DEMO_ACTION_RULE): Promise<void> {
   console.log("[seed:demo] created action_rule");
 }
 
-async function upsertVisibleFiles(bookId: string, files: typeof DEMO_VISIBLE_FILES): Promise<void> {
-  for (const f of files) {
+/**
+ * `visible_files` is an *overrides* table now (CLAUDE.md) — the author sees their whole Drive
+ * folder by default, so this only seeds the handful of rows that actually relabel/recategorize
+ * or hide a file, not an allowlist of everything visible.
+ */
+async function upsertFileOverrides(bookId: string, overrides: typeof DEMO_FILE_OVERRIDES): Promise<void> {
+  for (const o of overrides) {
+    const category = o.category ?? "Other";
     await db
       .insert(visibleFiles)
-      .values({ bookId, driveFileId: f.driveFileId, label: f.label, category: f.category, mimeType: f.mimeType })
+      .values({ bookId, driveFileId: o.driveFileId, label: o.label, category, mimeType: o.mimeType ?? null })
       .onConflictDoUpdate({
         target: [visibleFiles.bookId, visibleFiles.driveFileId],
-        set: { label: f.label, category: f.category, mimeType: f.mimeType },
+        set: { label: o.label, category, mimeType: o.mimeType ?? null },
       });
   }
-  console.log(`[seed:demo] ensured ${files.length} visible_files rows on book ${bookId}`);
+  console.log(`[seed:demo] ensured ${overrides.length} visible_files override row(s) on book ${bookId}`);
+}
+
+/**
+ * Sets the demo author's Drive root folder (one folder per author, per CLAUDE.md's master-folder
+ * model). Uses a raw SQL update instead of the Drizzle query builder (`db.update(users).set(...)`)
+ * because `users.driveFolderId` is a column the data-layer agent is adding to `src/db/schema.ts`
+ * concurrently with this work, and may not exist yet when this seed runs.
+ *
+ * TODO(lead): once that column lands (and a migration adds it), replace this whole function's
+ * body with `await db.update(users).set({ driveFolderId: DEMO_AUTHOR_FOLDER_ID }).where(eq(users.id, authorId));`
+ * and drop the try/catch. Also see `DEMO_AUTHOR_FOLDER_ID`'s own comment in `demo-data.ts` —
+ * `FixtureDriveReader` (`src/lib/drive/fixture.ts`) needs to know to serve this folder id too.
+ */
+async function linkDemoAuthorFolder(authorId: string): Promise<void> {
+  try {
+    await db.execute(sql`update ${users} set drive_folder_id = ${DEMO_AUTHOR_FOLDER_ID} where id = ${authorId}`);
+    console.log(`[seed:demo] linked author folder ${DEMO_AUTHOR_FOLDER_ID}`);
+  } catch (e) {
+    console.warn(
+      `[seed:demo] could not set users.drive_folder_id — has the schema migration for it landed yet? (${
+        e instanceof Error ? e.message : e
+      })`,
+    );
+  }
 }
 
 async function upsertNote(bookId: string, body: string): Promise<void> {
@@ -213,6 +244,8 @@ export async function seedDemo(): Promise<void> {
     hubspotContactId: DEMO_AUTHOR_HUBSPOT_CONTACT_ID,
   });
 
+  await linkDemoAuthorFolder(authorId);
+
   const book1 = await upsertBook(authorId, DEMO_BOOK_1);
   const book2 = await upsertBook(authorId, DEMO_BOOK_2);
   console.log(`[seed:demo] ensured books "${DEMO_BOOK_1.title}" and "${DEMO_BOOK_2.title}"`);
@@ -225,7 +258,7 @@ export async function seedDemo(): Promise<void> {
 
   await upsertPropertyDisplay(DEMO_PROPERTY_DISPLAY);
   await upsertActionRule(DEMO_ACTION_RULE);
-  await upsertVisibleFiles(book1.id, DEMO_VISIBLE_FILES);
+  await upsertFileOverrides(book1.id, DEMO_FILE_OVERRIDES);
   await upsertNote(book1.id, DEMO_NOTE_BODY);
   await seedHandbook();
 

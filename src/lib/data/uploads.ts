@@ -7,6 +7,7 @@ import { authorUploads, type AuthorUpload } from "@/db/schema-uploads";
 import { audit } from "@/lib/audit";
 import { env, isDemoMode, isUploadsConfigured } from "@/lib/env";
 import { listBooksForUser } from "@/lib/data/books";
+import { resolveAuthorUploadParentFolder } from "@/lib/data/files";
 import { createResumableSession, ensureFolder, finalizeUploadedFile } from "@/lib/drive/uploads";
 import { sanitizeFilename } from "@/lib/drive/mime";
 import { sendUploadNotificationEmail } from "@/lib/auth/email";
@@ -222,16 +223,38 @@ export async function createUploadSessionForUser(userId: string, input: CreateUp
     throw new UploadError("Uploads aren't set up yet. Please contact your Author Manager.");
   }
 
-  const rootFolderId = env.GOOGLE_UPLOADS_ROOT_FOLDER_ID;
   const authorName = user.name?.trim() || user.email;
-  const authorFolderName = sanitizeFilename(`${authorName} (${user.hubspotContactId ?? user.id})`);
-  const bookFolderName = sanitizeFilename(bookTitle ?? "General");
+
+  // Prefer the author's own Drive folder (see src/lib/data/files.ts) when we know one: files an
+  // author sends us should live alongside the files their team already shares with them, in
+  // "<author folder>/<matched book subfolder if any>/From the author/". Only when the author has
+  // no known Drive folder yet do we fall back to the older portal-owned upload tree below.
+  let bookDriveFolderId: string | null = null;
+  if (input.bookId) {
+    const [bookRow] = await db
+      .select({ driveFolderId: books.driveFolderId })
+      .from(books)
+      .where(and(eq(books.id, input.bookId), eq(books.userId, userId)))
+      .limit(1);
+    bookDriveFolderId = bookRow?.driveFolderId ?? null;
+  }
+  const authorUploadParentFolderId = await resolveAuthorUploadParentFolder(
+    userId,
+    input.bookId ? { id: input.bookId, title: bookTitle ?? "General", driveFolderId: bookDriveFolderId } : null,
+  ).catch(() => null);
 
   let bookFolderId: string;
   let sessionUri: string;
   try {
-    const authorFolderId = await ensureFolder(rootFolderId, authorFolderName);
-    bookFolderId = await ensureFolder(authorFolderId, bookFolderName);
+    if (authorUploadParentFolderId) {
+      bookFolderId = await ensureFolder(authorUploadParentFolderId, "From the author");
+    } else {
+      const rootFolderId = env.GOOGLE_UPLOADS_ROOT_FOLDER_ID;
+      const authorFolderName = sanitizeFilename(`${authorName} (${user.hubspotContactId ?? user.id})`);
+      const bookFolderName = sanitizeFilename(bookTitle ?? "General");
+      const authorFolderId = await ensureFolder(rootFolderId, authorFolderName);
+      bookFolderId = await ensureFolder(authorFolderId, bookFolderName);
+    }
     sessionUri = await createResumableSession({ folderId: bookFolderId, name: fileName, mimeType, sizeBytes: input.sizeBytes });
   } catch (err) {
     await audit(userId, "author.upload.failed", {

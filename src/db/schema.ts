@@ -55,6 +55,8 @@ export const users = pgTable(
     postalCode: text("postal_code"),
     country: text("country"),
     profileSyncedAt: timestamp("profile_synced_at", { mode: "date" }),
+    /** The author's Google Drive folder id (from the Project's "GD Link (Sync)"); books live in subfolders. */
+    driveFolderId: text("drive_folder_id"),
     passwordHash: text("password_hash"),
     totpSecret: text("totp_secret"),
     totpEnabled: boolean("totp_enabled").notNull().default(false),
@@ -274,6 +276,8 @@ export const visibleFiles = pgTable(
     label: text("label").notNull(),
     category: text("category").notNull().default("Other"),
     mimeType: text("mime_type"),
+    /** Staff override: hide this file from the author even though it is in their folder. */
+    hidden: boolean("hidden").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     createdById: uuid("created_by_id"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),

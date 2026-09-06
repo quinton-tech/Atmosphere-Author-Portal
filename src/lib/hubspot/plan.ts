@@ -12,6 +12,7 @@
  */
 import { PROJECT_PROPERTIES, pickPortalProperties, type PropertyMap } from "./properties";
 import { resolveStageKey } from "./stages";
+import { parseDriveFolderId } from "@/lib/drive/folder-url";
 import type { HubSpotContactSummary, HubSpotProject, HubSpotReader } from "./client";
 import type { StageConfig } from "@/db/schema";
 
@@ -26,6 +27,14 @@ export type PlannedUser = {
   region: string | null;
   postalCode: string | null;
   country: string | null;
+  /**
+   * The author's Drive folder id, parsed from whichever of their Projects has a `driveFolderUrl`
+   * (HubSpot `gd_link_sync`) set first — present on roughly half of Projects today. First
+   * non-null value wins across all of the author's Projects seen during this sync (see the loop
+   * below); null means none of their Projects have it set (yet), and `applyPlan` in sync.ts must
+   * never let that wipe a value staff already set by hand.
+   */
+  driveFolderId: string | null;
 };
 
 export type PlannedBook = {
@@ -109,6 +118,10 @@ export function planSync(
       continue;
     }
     const email = contact.email.trim().toLowerCase();
+    // driveFolderUrl points at the AUTHOR's folder (not the book), so any one of their Projects
+    // having it set is enough — first non-null value wins, across all Projects for this author
+    // seen in this sync (not just the first one processed).
+    const parsedFolderId = parseDriveFolderId(portalProps.driveFolderUrl);
     if (!usersByEmail.has(email)) {
       const name = [contact.firstname, contact.lastname].filter(Boolean).join(" ").trim() || null;
       usersByEmail.set(email, {
@@ -121,7 +134,11 @@ export function planSync(
         region: contact.region,
         postalCode: contact.postalCode,
         country: contact.country,
+        driveFolderId: parsedFolderId,
       });
+    } else if (parsedFolderId) {
+      const existing = usersByEmail.get(email)!;
+      if (!existing.driveFolderId) existing.driveFolderId = parsedFolderId;
     }
 
     const title = project.properties[titleProperty]?.trim() || "Untitled";

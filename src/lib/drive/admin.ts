@@ -18,7 +18,13 @@ export type AdminDriveFile = DriveFile & {
   category: string;
 };
 
-/** Lists a Drive folder's contents joined with this book's `visible_files` so the admin UI can show a checklist. */
+/**
+ * Lists a Drive folder's contents joined with this book's `visible_files` so the admin UI can
+ * show a checklist. `visible_files` is an OVERRIDES table (see CLAUDE.md): a file with no row at
+ * all is visible to the author by default, with its own Drive name and an inferred category. A
+ * row only ever relabels/recategorizes a file, or hides it (`hidden: true`) — its mere presence
+ * is not itself a "visible" signal the way it was before this table became overrides-only.
+ */
 export async function listFolderForAdmin(bookId: string, folderId: string): Promise<AdminDriveFile[]> {
   const [files, visibleRows] = await Promise.all([
     getDriveReader().listFolder(folderId),
@@ -29,7 +35,7 @@ export async function listFolderForAdmin(bookId: string, folderId: string): Prom
     const v = byDriveId.get(f.id);
     return {
       ...f,
-      visible: !!v,
+      visible: !v?.hidden,
       visibleFileId: v?.id ?? null,
       label: v?.label ?? f.name,
       category: v?.category ?? "Other",
@@ -46,8 +52,12 @@ export type SetFileVisibilityInput = {
 };
 
 /**
- * Upserts (or deletes) the `visible_files` row for one Drive file on one book, and audits the change.
- * `actorId` is the admin user making the change.
+ * Upserts (or, when there's nothing left to override, deletes) the `visible_files` OVERRIDES row
+ * for one Drive file on one book, and audits the change. `actorId` is the admin user making the
+ * change. `input.visible: false` sets `hidden: true` on the row (creating one if needed) — it no
+ * longer deletes the row, since deleting it would fall back to the default-visible state this is
+ * trying to prevent. `input.visible: true` with no label/category and no existing row is a no-op:
+ * an unhidden file with no customization needs no override row at all.
  */
 export async function setFileVisibility(
   bookId: string,
@@ -64,25 +74,21 @@ export async function setFileVisibility(
     .where(and(eq(visibleFiles.bookId, bookId), eq(visibleFiles.driveFileId, driveFileId)))
     .limit(1);
 
-  if (!input.visible) {
-    if (existing) {
-      await db.delete(visibleFiles).where(eq(visibleFiles.id, existing.id));
-    }
-    await audit(actorId, "admin.file.visibility", {
-      targetType: "book",
-      targetId: bookId,
-      meta: { driveFileId, visible: false },
-    });
-    return;
-  }
-
+  const hidden = !input.visible;
   const label = input.label?.trim() || existing?.label || "Untitled file";
   const category = input.category?.trim() || existing?.category || "Other";
+
+  if (!existing && !hidden && !input.label?.trim() && !input.category?.trim()) {
+    // Nothing to override: the file is already visible by default with its own name/inferred
+    // category, so no row is needed.
+    await audit(actorId, "admin.file.visibility", { targetType: "book", targetId: bookId, meta: { driveFileId, visible: true, noop: true } });
+    return;
+  }
 
   if (existing) {
     await db
       .update(visibleFiles)
-      .set({ label, category, mimeType: input.mimeType ?? existing.mimeType })
+      .set({ label, category, hidden, mimeType: input.mimeType ?? existing.mimeType })
       .where(eq(visibleFiles.id, existing.id));
   } else {
     await db.insert(visibleFiles).values({
@@ -90,6 +96,7 @@ export async function setFileVisibility(
       driveFileId,
       label,
       category,
+      hidden,
       mimeType: input.mimeType ?? null,
       createdById: actorId,
     });
@@ -98,7 +105,7 @@ export async function setFileVisibility(
   await audit(actorId, "admin.file.visibility", {
     targetType: "book",
     targetId: bookId,
-    meta: { driveFileId, visible: true, label, category },
+    meta: { driveFileId, visible: input.visible, hidden, label, category },
   });
 }
 

@@ -8,11 +8,14 @@ import type { MilestoneView, WebsiteView } from "@/lib/types";
  */
 export function PublishedSummary({
   bookId,
+  amazonUrl,
   milestones,
   website,
   suggestedQuestions,
 }: {
   bookId: string;
+  /** Amazon product page, when HubSpot has one — shown as an extra pill alongside the milestone links. */
+  amazonUrl?: string | null;
   milestones: MilestoneView[];
   website: WebsiteView | null;
   suggestedQuestions: string[];
@@ -37,7 +40,7 @@ export function PublishedSummary({
           </a>
         ))}
         <Link
-          href={`/books/${bookId}/files`}
+          href={`/files#book-${bookId}`}
           className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink"
         >
           Your files
@@ -45,6 +48,16 @@ export function PublishedSummary({
         {website && (
           <a href="#website" className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink">
             Your author website
+          </a>
+        )}
+        {amazonUrl && (
+          <a
+            href={amazonUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink"
+          >
+            Order copies on Amazon
           </a>
         )}
       </div>

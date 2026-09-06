@@ -10,11 +10,24 @@ import { env } from "@/lib/env";
  * CLAUDE.md's hard rule is "Drive is READ ONLY" with one approved exception: authors sending us
  * files (manuscripts, signed forms) via `/uploads`, and admins uploading the Author Handbook via
  * `/admin/handbook`. Both flows are served entirely by this module, which builds its own JWT
- * client from a SEPARATE service account credential (`GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64`)
- * scoped to `drive.file` only — that scope means the credential can see/create/update only files
- * and folders IT created, never the read-only tree `src/lib/drive/client.ts` reads from. Nothing
- * else in the codebase may call a Drive mutating method; `uploads.guard.test.ts` fails the build
- * otherwise.
+ * client from a SEPARATE service account credential (`GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64`).
+ * Nothing else in the codebase may call a Drive mutating method; `uploads.guard.test.ts` fails
+ * the build otherwise.
+ *
+ * SCOPE (changed for the whole-folder Drive model — see CLAUDE.md / the file model report):
+ * this credential now targets `https://www.googleapis.com/auth/drive` (full access), not the
+ * narrower `drive.file` scope used previously. That's a deliberate widening, not an oversight —
+ * `drive.file` only grants access to files/folders the credential itself created (or that a user
+ * explicitly opened with a picker), which is fine for a portal-owned upload tree but cannot write
+ * into an AUTHOR's own Drive folder that a human shared with this service account as an Editor
+ * collaborator (see `resolveAuthorUploadParentFolder` in `src/lib/data/files.ts`, which finds the
+ * author's folder discovered via the separate READ-ONLY service account). `drive.file` would
+ * silently 404 on every `ensureFolder`/create call against that folder tree. The security
+ * boundary this app relies on is therefore no longer "the OAuth scope can't reach it" but "this
+ * is a separate credential from the one used for reads, isolated to this one module" (still true,
+ * and still enforced by `uploads.guard.test.ts`) plus Drive's own sharing model: this credential
+ * can only reach the master folder (and its descendants) because staff explicitly shared it with
+ * the account as an Editor. DEPLOY.md needs updating to say so explicitly.
  *
  * Uploads go straight from the author's/admin's browser to Drive via a *resumable session*
  * (`createResumableSession` below), never through a Vercel function — Vercel caps function
@@ -24,7 +37,7 @@ import { env } from "@/lib/env";
  * ordinary Drive client (not raw fetch) to confirm what landed and, for the handbook, read it back.
  */
 
-const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 const RESUMABLE_UPLOAD_ENDPOINT = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,webViewLink";
 
@@ -54,7 +67,7 @@ function escapeDriveQueryValue(value: string): string {
 let jwtClient: JWT | null = null;
 let driveClient: drive_v3.Drive | null = null;
 
-/** Lazily builds (and reuses) the drive.file-scoped JWT client. Exposed separately from
+/** Lazily builds (and reuses) the uploads-scoped JWT client. Exposed separately from
  *  `client()` because `createResumableSession` needs a bearer token for a raw `fetch`, not the
  *  typed `drive_v3.Drive` client — Google's resumable-session *initiation* has no method on the
  *  googleapis client library, only the classic REST shape. */
@@ -64,7 +77,7 @@ function auth(): JWT {
     jwtClient = new google.auth.JWT({
       email: creds.client_email,
       key: creds.private_key,
-      scopes: [DRIVE_FILE_SCOPE],
+      scopes: [DRIVE_SCOPE],
     });
   }
   return jwtClient;
@@ -179,8 +192,7 @@ export async function finalizeUploadedFile(fileId: string): Promise<{
 }
 
 /** Reads back the bytes of a file this credential created — used only for the handbook flow, to
- *  ingest the PDF/DOCX the admin just PUT to Drive. `alt: "media"` on a `drive.file`-scoped
- *  credential is fine for a file it created itself; it still can't read anything it didn't. */
+ *  ingest the PDF/DOCX the admin just PUT to Drive. */
 export async function downloadUploadedFile(fileId: string): Promise<Buffer> {
   const drive = client();
   const res = await drive.files.get({ fileId, alt: "media", supportsAllDrives: true }, { responseType: "arraybuffer" });

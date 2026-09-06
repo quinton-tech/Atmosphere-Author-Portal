@@ -8,7 +8,7 @@ import { requireAdmin } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { adminRevokeAccess } from "@/lib/auth/invite";
 import { redirectWithFlash, runAction } from "../../_lib/flash";
-import { linkFolder, resendInvite, setFileVisibility, syncAuthor } from "../../_integrations";
+import { linkFolder, resendInvite, syncAuthor, upsertFileOverride } from "../../_integrations";
 import { getBookRowForAuthor } from "./queries";
 
 const uuid = z.string().uuid();
@@ -149,33 +149,38 @@ export async function setWebsiteEditOverrideAction(userId: string, bookId: strin
   );
 }
 
-export async function setFileVisibilityAction(userId: string, bookId: string, driveFileId: string, formData: FormData): Promise<void> {
+/**
+ * Hide/show + relabel/recategorize one Drive file for one book. `visible_files` is an overrides
+ * table now (CLAUDE.md) — an author sees their whole Drive folder by default, so an empty
+ * label/category here means "no override, use the default", not "invalid".
+ */
+export async function upsertFileOverrideAction(userId: string, bookId: string, driveFileId: string, formData: FormData): Promise<void> {
   const admin = await requireAdmin();
   const uid = uuid.parse(userId);
   const bid = uuid.parse(bookId);
   await assertBookBelongsToAuthor(uid, bid);
   const parsed = z
     .object({
-      visible: z.literal("on").optional(),
-      label: z.string().trim().min(1).max(200),
-      category: z.string().trim().min(1).max(100),
+      hidden: z.literal("on").optional(),
+      label: z.string().trim().max(200).optional().default(""),
+      category: z.string().trim().max(100).optional().default(""),
     })
     .safeParse({
-      visible: formData.get("visible") ?? undefined,
-      label: formData.get("label"),
-      category: formData.get("category"),
+      hidden: formData.get("hidden") ?? undefined,
+      label: formData.get("label") ?? "",
+      category: formData.get("category") ?? "",
     });
   if (!parsed.success) redirectWithFlash(detailPath(uid, bid), "error", parsed.error.issues[0]?.message ?? "Invalid file settings.");
 
   await runAction(
     detailPath(uid, bid),
     async () => {
-      await setFileVisibility(bid, driveFileId, {
-        visible: !!parsed.data!.visible,
+      await upsertFileOverride(bid, driveFileId, {
+        hidden: !!parsed.data!.hidden,
         label: parsed.data!.label,
         category: parsed.data!.category,
       });
     },
-    "File visibility updated.",
+    "File updated.",
   );
 }

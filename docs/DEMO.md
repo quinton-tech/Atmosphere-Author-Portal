@@ -14,7 +14,9 @@ Demo mode is gated entirely by one env var, `DEMO_MODE` (`src/lib/env.ts`). When
   (`src/lib/drive/fixture.ts`) instead of the real Google Drive client. It serves two small,
   checked-in files from `public/demo/` — `cover.svg` and `blurb.pdf` — under fixture ids
   `demo-cover` / `demo-blurb` and folder id `demo-folder`. No `GOOGLE_SERVICE_ACCOUNT_JSON_B64`
-  needed.
+  needed. `demo-folder` sits under the fixture author folder id `demo-author-folder` (the demo
+  author's own subfolder, per the one-folder-per-author model in `docs/DEPLOY.md` §4), seeded onto
+  `users.driveFolderId` for the demo author by `linkDemoAuthorFolder` in `src/db/seed-demo.ts`.
 - An author's own Account-page contact info edit (`src/lib/hubspot/contact-info.ts`) skips the
   HubSpot write and only updates the local cache + audit log, so that form still works without
   `HUBSPOT_ACCESS_TOKEN`.
@@ -128,9 +130,10 @@ Full fixture data lives in `src/db/demo-data.ts`; the seeding logic (idempotent)
 - **HubSpot sync** never runs; there's nothing to reconcile against, since the fixture data is
   written directly. `/admin/health`'s sync-run history will stay empty, and its "Run incremental
   sync" / "Run full sync" buttons will just hit the demo no-op.
-- **Google Drive** is two files, not a real folder tree — the admin file-visibility picker
-  (`/admin/authors/[id]`) will only ever show `demo-folder`'s two fixture files for book 1, and
-  nothing for book 2 (it has no `driveFolderId`).
+- **Google Drive** is two files, not a real folder tree — the author's "Your files" page (`/files`)
+  and the admin folder browser (`/admin/authors/[id]`) will only ever show `demo-author-folder` →
+  `demo-folder`'s two fixture files for book 1, and nothing under book 2 (it has no `driveFolderId`
+  of its own — see the master-folder model in `docs/DEPLOY.md` §4).
 - **Magic-link sign-in** doesn't work (no `RESEND_API_KEY`) — always use the password field on
   `/sign-in`. Password reset email likewise won't send; both demo accounts already have passwords,
   so this shouldn't come up.

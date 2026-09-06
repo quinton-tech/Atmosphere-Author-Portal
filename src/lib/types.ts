@@ -48,6 +48,41 @@ export type FileView = {
   thumbnailHref: string | null;
 };
 
+/** One file in the author's Drive folder, as shown to the author. Hrefs are portal proxy URLs, never Drive links. */
+export type DriveFileView = {
+  id: string; // Drive file id
+  name: string; // Drive name
+  label: string; // staff override or name without extension
+  category: string; // staff override or inferred (Cover, Manuscript, Proof, Blurb, Other)
+  mimeType: string;
+  size: number | null;
+  modifiedAt: string | null; // ISO
+  href: string; // /api/files/d/<id>
+  downloadHref: string; // /api/files/d/<id>?download=1
+  thumbnailHref: string | null;
+  folderPath: string[]; // folder names below the author folder
+};
+
+export type DriveFolderGroup = {
+  folderId: string;
+  name: string;
+  path: string[];
+  /** Book this subfolder was matched to by title, if any. */
+  bookId: string | null;
+  files: DriveFileView[];
+};
+
+export type AuthorFilesView = {
+  /** False when no Drive folder is known for this author yet. */
+  connected: boolean;
+  folderName: string | null;
+  /** The author folder's own files first (folderId = root), then subfolders. */
+  groups: DriveFolderGroup[];
+  listedAt: string | null; // ISO, when the listing was fetched
+  /** Set when Drive could not be reached; groups may be a stale cache. */
+  error: string | null;
+};
+
 export type NoteView = {
   id: string;
   body: string;
@@ -153,8 +188,10 @@ export type BookDetail = BookSummary & {
   primaryContact: PrimaryContact | null;
   /** Estimated next thing the author will hear about, from typical stage durations. */
   nextUpdate: NextUpdate | null;
-  /** Portal proxy URL of the cover image (first visible file in the "Cover" category), if any. */
+  /** Portal proxy URL of the cover image, auto-detected from the author's Drive folder, if any. */
   coverHref: string | null;
+  /** Amazon product page when HubSpot has one. */
+  amazonUrl: string | null;
   team: TeamMember[];
   milestones: MilestoneView[];
   /** Null unless the author has a website in progress (websiteUrl, websiteDomain, or websiteStatus set). */

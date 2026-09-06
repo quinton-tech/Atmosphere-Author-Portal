@@ -6,6 +6,8 @@ import type {
   AuthorInfo,
   BookDetail,
   BookSummary,
+  DriveFolderGroup,
+  FileView,
   MilestoneView,
   NextUpdate,
   PhaseView,
@@ -21,7 +23,22 @@ import { TEAM_ROLES } from "@/lib/hubspot/properties";
 import { resolveStageKey } from "@/lib/hubspot/stages";
 import { buildTeam, buildTimeline, cleanTeaser, displayPersonName, friendly, parseDate, type DisplayLabels } from "@/lib/hubspot/timeline";
 import { getTeamDirectory } from "@/lib/data/team";
+import { getAuthorFiles } from "@/lib/data/files";
 import { nameKey } from "@/lib/team/parse";
+
+const FILE_PREVIEW_LIMIT = 12;
+
+/** First image in `group` whose Drive name matches `/cover/i`, else (when `coverOnly` is false)
+ *  simply the first image in `group`. Null when `group` is null or has no matching image. */
+function firstImageInGroup(group: DriveFolderGroup | null, coverOnly: boolean) {
+  if (!group) return null;
+  const images = group.files.filter((f) => f.mimeType.startsWith("image/"));
+  return (coverOnly ? images.find((f) => /cover/i.test(f.name)) : images[0]) ?? null;
+}
+
+function toFileView(f: { id: string; label: string; category: string; mimeType: string; href: string; thumbnailHref: string | null }): FileView {
+  return { id: f.id, label: f.label, category: f.category, mimeType: f.mimeType, href: f.href, thumbnailHref: f.thumbnailHref };
+}
 
 const BLUEHOST_HOSTING_URL = "https://my.bluehost.com";
 
@@ -191,10 +208,9 @@ export async function getBookForUser(
   if (!row) return null;
   const { book, cache } = row;
 
-  const [stages, rules, files, noteRows, labels, milestoneRows, websiteOverrides, primaryContactSetting, ownersByName] = await Promise.all([
+  const [stages, rules, noteRows, labels, milestoneRows, websiteOverrides, primaryContactSetting, ownersByName, authorFiles] = await Promise.all([
     db.select().from(stageConfig).orderBy(asc(stageConfig.sortOrder)),
     db.select().from(actionRules).where(eq(actionRules.enabled, true)).orderBy(asc(actionRules.sortOrder)),
-    db.select().from(visibleFiles).where(eq(visibleFiles.bookId, book.id)).orderBy(asc(visibleFiles.sortOrder)),
     db
       .select()
       .from(notes)
@@ -205,6 +221,9 @@ export async function getBookForUser(
     loadWebsiteEditOverrides(),
     loadPrimaryContactSetting(),
     loadOwnersByName(),
+    // A Drive outage must never break the book page: fall back to "no Drive data" rather than
+    // throwing, so coverHref/filesConnected/files below just see an empty/disconnected view.
+    getAuthorFiles(userId).catch(() => null),
   ]);
 
   const props = cache?.properties ?? {};
@@ -283,16 +302,16 @@ export async function getBookForUser(
   const currentStage = finalizedStages.find((s) => s.state === "current") ?? null;
 
   const primaryContact = await buildPrimaryContact(props, primaryContactSetting, ownersByName);
-  const filesView = files.map((f) => ({
-    id: f.id,
-    label: f.label,
-    category: f.category,
-    mimeType: f.mimeType,
-    href: `/api/files/${f.id}`,
-    thumbnailHref: f.mimeType?.startsWith("image/") || f.mimeType === "application/pdf" ? `/api/files/${f.id}/thumbnail` : null,
-  }));
+
+  // The author's Drive folder is the source of both the cover image and the "View files" preview
+  // now (see src/lib/data/files.ts) — visible_files is an overrides table, not a file list.
+  const matchedGroup = authorFiles?.groups.find((g) => g.bookId === book.id) ?? null;
+  const rootGroup = authorFiles?.groups.find((g) => g.path.length === 0) ?? null;
+  const coverFile = firstImageInGroup(matchedGroup, true) ?? firstImageInGroup(rootGroup, true) ?? firstImageInGroup(matchedGroup, false);
+  const filesView = (matchedGroup?.files ?? []).slice(0, FILE_PREVIEW_LIMIT).map(toFileView);
+
   const nextUpdate = buildNextUpdate(currentStage, now);
-  const coverHref = filesView.find((f) => f.category.toLowerCase() === "cover" && f.mimeType?.startsWith("image/"))?.thumbnailHref ?? null;
+  const coverHref = coverFile ? (coverFile.thumbnailHref ?? coverFile.href) : null;
 
   return {
     id: book.id,
@@ -310,13 +329,14 @@ export async function getBookForUser(
     timeline: buildTimeline(props, stages, currentKey, labels, now, milestoneEvents),
     team: buildTeam(props, labels),
     milestones: visibleMilestones,
+    amazonUrl: props.amazonUrl?.trim() ? (props.amazonUrl.startsWith("http") ? props.amazonUrl.trim() : `https://${props.amazonUrl.trim()}`) : null,
     website: buildWebsite(book.id, props, websiteOverrides, labels, now),
     package: friendly("package", props.package, labels),
     teaser: cleanTeaser(props.teaser),
     initiationDate: initiationDateIso,
     publicationDate: publicationDateIso,
     isPublished: Boolean(publicationDateIso && new Date(publicationDateIso).getTime() <= now.getTime()),
-    filesConnected: Boolean(book.driveFolderId),
+    filesConnected: Boolean(authorFiles?.connected) || Boolean(book.driveFolderId),
     actions: evaluateActionRules(props, rules),
     files: filesView,
     notes: noteRows.map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt.toISOString() })),
