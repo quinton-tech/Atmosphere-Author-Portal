@@ -28,6 +28,10 @@ export const PROJECT_PROPERTIES: PortalProperty[] = [
   { id: "serviceAddOns", label: "Service Add-ons", kind: "enum", group: "production" },
   { id: "teaser", label: "Description/Teaser Final", kind: "text", group: "production", friendly: "Your book's teaser" },
   { id: "publicationDate", label: "Publication Date (Claire-only)", kind: "date", group: "production", friendly: "Publication date" },
+  // HubSpot's own record-creation timestamp. Used only to detect "date entered <stage>" values that
+  // are migration artifacts (the record was bulk-imported into HubSpot, not actually entering that
+  // stage that day) — see sanitiseStageEnteredAt in data/books.ts.
+  { id: "recordCreated", label: "Create Date", kind: "date", group: "production", internalName: "hs_createdate" },
 
   // Author website. The "* " on the real HubSpot label is part of the label itself (not a
   // markdown/required-field marker we're stripping), so `internalName` is set explicitly rather

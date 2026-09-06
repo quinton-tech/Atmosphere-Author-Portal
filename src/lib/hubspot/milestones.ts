@@ -78,7 +78,11 @@ type MilestoneRow = Pick<
   | "includeRule"
   | "sortOrder"
   | "enabled"
->;
+> & {
+  /** Admin-configured link text template, e.g. "Read your {venue} review". Optional: another
+   *  migration is adding this column to stage_milestones alongside the row's other fields. */
+  linkLabel?: string | null;
+};
 
 export function evaluateMilestones(
   props: Record<string, string | null>,
@@ -138,6 +142,11 @@ export function evaluateMilestones(
     const linkRaw = m.linkProperty ? props[`hs:${m.linkProperty}`] : null;
     const href = linkRaw && /^https?:\/\//i.test(linkRaw.trim()) ? linkRaw.trim() : null;
 
+    // Null whenever there's no link to show, regardless of a configured label — a link label with
+    // nothing to link to would be dead text. Otherwise an admin-configured template (with "{venue}"
+    // filled in) wins, falling back to a generic "View".
+    const linkLabel = !href ? null : m.linkLabel ? m.linkLabel.replaceAll("{venue}", venueLabel ?? "") : "View";
+
     const at = (ownDate ?? linkedDate)?.toISOString() ?? null;
 
     ranked.push({
@@ -153,6 +162,7 @@ export function evaluateMilestones(
         detail,
         at,
         href,
+        linkLabel,
       },
     });
   }

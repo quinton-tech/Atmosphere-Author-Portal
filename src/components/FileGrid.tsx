@@ -15,7 +15,7 @@ function shortKind(mimeType: string | null): string {
 /** Grouped by category. Thumbnails and downloads always route through the portal's file proxy. */
 export function FileGrid({ files }: { files: FileView[] }) {
   if (files.length === 0) {
-    return <EmptyState title="No files yet." message="Check back soon or email your Author Manager." />;
+    return <EmptyState title="Nothing shared yet." message="Check back soon or email your Author Manager." />;
   }
 
   const groups = new Map<string, FileView[]>();

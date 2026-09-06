@@ -98,7 +98,7 @@ describe("fetchAndPlanPage (fake HubSpotReader)", () => {
         return new Map<string, HubSpotContactSummary>([["c1", { id: "c1", email: "a@b.com", firstname: "A", lastname: "B" }]]);
       },
       async getOwners() {
-        return new Map<string, string>();
+        return new Map<string, { name: string; email: string | null }>();
       },
       async getProjectsForContact() {
         return [];
@@ -136,7 +136,7 @@ describe("fetchAndPlanPage (fake HubSpotReader)", () => {
         return new Map();
       },
       async getOwners() {
-        return new Map<string, string>();
+        return new Map<string, { name: string; email: string | null }>();
       },
       async getProjectsForContact() {
         return [];

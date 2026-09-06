@@ -27,17 +27,20 @@ describe("computeDerivedStageState", () => {
     expect(view?.state).toBe("done");
     expect(view?.kind).toBe("derived");
     expect(view?.isDerived).toBe(true);
+    expect(view?.completion).toBe("confirmed");
   });
 
   it("is current when in-progress and the parent pipeline stage is current, with no later stage current", () => {
     const view = computeDerivedStageState(stage(), [{ id: "m1", state: "in_progress" }], pipelineStages);
     expect(view?.state).toBe("current");
+    expect(view?.completion).toBeNull();
   });
 
   it("is done when the parent pipeline stage is already done, even if a milestone is still in progress", () => {
     const parentDoneNoLaterCurrent = [pipeline("proofreading", 30, "done"), pipeline("interior_design", 60, "upcoming")];
     const view = computeDerivedStageState(stage({ parentStageKey: "proofreading" }), [{ id: "m1", state: "scheduled" }], parentDoneNoLaterCurrent);
     expect(view?.state).toBe("done");
+    expect(view?.completion).toBe("inferred");
   });
 
   it("is done when the parent is done and the pipeline has moved further on", () => {
@@ -45,6 +48,7 @@ describe("computeDerivedStageState", () => {
     // interior_design — the phase is behind the book regardless of a stale milestone value.
     const view = computeDerivedStageState(stage({ parentStageKey: "proofreading" }), [{ id: "m1", state: "scheduled" }], pipelineStages);
     expect(view?.state).toBe("done");
+    expect(view?.completion).toBe("inferred");
   });
 
   it("is upcoming when in-progress but the parent pipeline stage hasn't started", () => {
@@ -63,6 +67,7 @@ describe("computeDerivedStageState", () => {
   it("is upcoming when milestones exist but are all pending", () => {
     const view = computeDerivedStageState(stage(), [{ id: "m1", state: "pending" }], pipelineStages);
     expect(view?.state).toBe("upcoming");
+    expect(view?.completion).toBeNull();
   });
 
   it("is omitted when no linked milestone is present and showWhenEmpty is false", () => {

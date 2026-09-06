@@ -1,6 +1,6 @@
 export function EmptyState({
   title = "We're setting up your book.",
-  message = "Check back soon or email your Author Manager.",
+  message = "Check back soon or email your main contact.",
 }: {
   title?: string;
   message?: string;

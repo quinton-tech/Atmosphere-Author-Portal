@@ -7,7 +7,9 @@ const stages = [
   { key: "publicity", label: "Publicity", sortOrder: 2 },
 ];
 
-function milestone(over: Partial<StageMilestone> & Pick<StageMilestone, "id" | "stageKey" | "label" | "propertyName">): StageMilestone {
+function milestone(
+  over: Partial<StageMilestone> & { linkLabel?: string | null } & Pick<StageMilestone, "id" | "stageKey" | "label" | "propertyName">,
+): StageMilestone & { linkLabel?: string | null } {
   return {
     description: "",
     kind: "status",
@@ -22,7 +24,7 @@ function milestone(over: Partial<StageMilestone> & Pick<StageMilestone, "id" | "
     enabled: true,
     updatedAt: new Date(),
     ...over,
-  } as StageMilestone;
+  } as StageMilestone & { linkLabel?: string | null };
 }
 
 describe("evaluateMilestones", () => {
@@ -164,12 +166,66 @@ describe("evaluateMilestones", () => {
     expect(view.detail).toBe("Sent to author · June 1, 2025");
     expect(view.href).toBe("https://kirkusreviews.com/abc");
     expect(view.state).toBe("done");
+    expect(view.linkLabel).toBe("View"); // no linkLabel configured on the row -> generic fallback
   });
 
   it("does not produce an href for a non-URL link value", () => {
     const m = milestone({ id: "m1", stageKey: "publicity", label: "Goodreads", propertyName: "goodreads_listing", linkProperty: "goodreads_link", doneValues: ["Completed"] });
     const views = evaluateMilestones({ "hs:goodreads_listing": "Completed", "hs:goodreads_link": "n/a" }, [m], stages, {});
     expect(views[0].href).toBeNull();
+    expect(views[0].linkLabel).toBeNull();
+  });
+
+  it("substitutes {venue} into a configured link label, using the friendly-labelled venue", () => {
+    const m = milestone({
+      id: "m1",
+      stageKey: "publicity",
+      label: "Premier review",
+      propertyName: "premier_review",
+      doneValues: ["Kirkus rev sent to author"],
+      venueProperty: "premier_review_venue",
+      linkProperty: "kirkus_link",
+      linkLabel: "Read your {venue} review",
+    });
+    const props = {
+      "hs:premier_review": "Kirkus rev sent to author",
+      "hs:premier_review_venue": "kirkus",
+      "hs:kirkus_link": "https://kirkusreviews.com/abc",
+    };
+    const labels = { premier_review_venue: { kirkus: "Kirkus" } };
+    const [view] = evaluateMilestones(props, [m], stages, labels);
+    expect(view.linkLabel).toBe("Read your Kirkus review");
+  });
+
+  it("keeps a configured link label without a {venue} placeholder as-is, and returns null when there is no href even if a label is configured", () => {
+    const withHref = milestone({
+      id: "m1",
+      stageKey: "publicity",
+      label: "NetGalley",
+      propertyName: "netgalley",
+      linkProperty: "netgalley_link",
+      doneValues: ["Archived"],
+      linkLabel: "See your listing",
+    });
+    const viewWithHref = evaluateMilestones(
+      { "hs:netgalley": "Archived", "hs:netgalley_link": "https://netgalley.com/x" },
+      [withHref],
+      stages,
+      {},
+    )[0];
+    expect(viewWithHref.linkLabel).toBe("See your listing");
+
+    const noHref = milestone({
+      id: "m2",
+      stageKey: "publicity",
+      label: "NetGalley",
+      propertyName: "netgalley2",
+      doneValues: ["Archived"],
+      linkLabel: "See your listing",
+    });
+    const viewNoHref = evaluateMilestones({ "hs:netgalley2": "Archived" }, [noHref], stages, {})[0];
+    expect(viewNoHref.href).toBeNull();
+    expect(viewNoHref.linkLabel).toBeNull();
   });
 
   it("sorts by stage sortOrder then milestone sortOrder", () => {

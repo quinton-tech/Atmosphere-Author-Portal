@@ -234,6 +234,10 @@ export const stageMilestones = pgTable(
     dateProperty: text("date_property"),
     /** Its value is appended to the label, e.g. "Premier review · Kirkus". */
     venueProperty: text("venue_property"),
+    /** Author-facing link text for `linkProperty`'s href, e.g. "Read your {venue} review". Supports
+     *  a `{venue}` placeholder filled from `venueProperty`'s friendly label. Null falls back to a
+     *  generic "View" in the UI. */
+    linkLabel: text("link_label"),
     /** Null = shown to everyone. Otherwise included if ANY listed condition matches. */
     includeRule: jsonb("include_rule").$type<MilestoneIncludeRule>(),
     sortOrder: integer("sort_order").notNull().default(0),

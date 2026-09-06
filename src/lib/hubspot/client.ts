@@ -50,11 +50,12 @@ export interface HubSpotReader {
    */
   getProjectsForContact(contactId: string): Promise<HubSpotProject[]>;
   /**
-   * HubSpot owner id -> display name, active and archived owners alike (former staff still appear
-   * on old Projects). Team properties (BPM, DE, PR, …) reference owners, so the sync stores names.
+   * HubSpot owner id -> { name, email }, active and archived owners alike (former staff still
+   * appear on old Projects). Team properties (BPM, DE, PR, …) reference owners, so the sync stores
+   * names (and, since the portal's "primary contact" needs to email that person, their address too).
    * Needs the `crm.objects.owners.read` scope; callers treat a failure as "no names available".
    */
-  getOwners(): Promise<Map<string, string>>;
+  getOwners(): Promise<Map<string, { name: string; email: string | null }>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,16 +205,17 @@ class HubSpotApiClient implements HubSpotReader, HubSpotContactWriter {
     return projects.filter((p): p is HubSpotProject => p !== null);
   }
 
-  async getOwners(): Promise<Map<string, string>> {
-    const out = new Map<string, string>();
+  async getOwners(): Promise<Map<string, { name: string; email: string | null }>> {
+    const out = new Map<string, { name: string; email: string | null }>();
     for (const archived of [false, true]) {
       let after: string | undefined;
       do {
         const res = await withRetry(() => this.client.crm.owners.ownersApi.getPage(undefined, after, 500, archived));
         for (const o of res.results) {
           const name = [o.firstName, o.lastName].filter(Boolean).join(" ").trim() || o.email || String(o.id);
-          out.set(String(o.id), name);
-          if (o.userId != null) out.set(String(o.userId), name);
+          const entry = { name, email: o.email ?? null };
+          out.set(String(o.id), entry);
+          if (o.userId != null) out.set(String(o.userId), entry);
         }
         after = res.paging?.next?.after;
       } while (after);

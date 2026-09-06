@@ -11,17 +11,25 @@ const uploadSchema = z.object({
   note: z.string().trim().max(2000).optional().or(z.literal("")),
 });
 
-function redirectWithFlash(kind: "ok" | "error", message: string): never {
+/** Only ever redirects back into this app — used so the form can be embedded on /uploads or on a
+ *  book's Files area and land the author back where they submitted from. */
+function safeRedirectBase(raw: FormDataEntryValue | null): string {
+  const value = String(raw ?? "");
+  return value.startsWith("/") && !value.startsWith("//") ? value : "/uploads";
+}
+
+function redirectWithFlash(base: string, kind: "ok" | "error", message: string): never {
   const params = new URLSearchParams({ [kind]: message });
-  redirect(`/uploads?${params.toString()}`);
+  redirect(`${base}?${params.toString()}`);
 }
 
 export async function uploadFileAction(formData: FormData): Promise<void> {
   const user = await requireUser();
+  const redirectBase = safeRedirectBase(formData.get("redirectTo"));
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
-    redirectWithFlash("error", "Please choose a file to send.");
+    redirectWithFlash(redirectBase, "error", "Please choose a file to send.");
   }
 
   const parsed = uploadSchema.safeParse({
@@ -30,10 +38,13 @@ export async function uploadFileAction(formData: FormData): Promise<void> {
     note: formData.get("note") ?? "",
   });
   if (!parsed.success) {
-    redirectWithFlash("error", "Please check the highlighted fields and try again.");
+    redirectWithFlash(redirectBase, "error", "Please check the highlighted fields and try again.");
   }
 
   try {
+    // Ownership of bookId (when set) is re-checked inside createUploadForUser via
+    // listBooksForUser — never trusted just because the form said so, whether that form was the
+    // free-standing /uploads picker or a book's Files area with the book "fixed".
     await createUploadForUser(effectiveUserId(user), {
       bookId: parsed.data.bookId || null,
       kind: parsed.data.kind,
@@ -42,8 +53,8 @@ export async function uploadFileAction(formData: FormData): Promise<void> {
     });
   } catch (err) {
     const message = err instanceof UploadError ? err.message : "We couldn't send that file just now. Please try again.";
-    redirectWithFlash("error", message);
+    redirectWithFlash(redirectBase, "error", message);
   }
 
-  redirectWithFlash("ok", "Sent. Your team will see it within a few minutes.");
+  redirectWithFlash(redirectBase, "ok", "Sent. Your team will see it within a few minutes.");
 }

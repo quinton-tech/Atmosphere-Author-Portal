@@ -4,7 +4,7 @@ import { setPasswordAction, signOutEverywhereAction, updateContactInfoAction } f
 
 const CONTACT_MESSAGES: Record<string, { ok: boolean; text: string }> = {
   ok: { ok: true, text: "Saved. Our team will see the update within a few minutes." },
-  error: { ok: false, text: "We couldn't save that just now. Please try again, or email your Author Manager." },
+  error: { ok: false, text: "We couldn't save that just now. Please try again, or email your main contact." },
   invalid: { ok: false, text: "Please check the highlighted fields and try again." },
 };
 
@@ -57,7 +57,7 @@ export default async function AccountPage({
       <section className="mt-10">
         <h2 className="eyebrow">Email</h2>
         <p className="mt-2 text-ink">{user.email}</p>
-        <p className="mt-1 text-sm text-muted">To change your email, contact your Author Manager.</p>
+        <p className="mt-1 text-sm text-muted">To change your email, ask your main contact.</p>
       </section>
 
       <section className="mt-10">

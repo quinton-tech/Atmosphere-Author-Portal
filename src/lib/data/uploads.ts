@@ -126,6 +126,31 @@ export async function listUploadsForUser(userId: string): Promise<UploadListItem
   }));
 }
 
+/** Ownership-scoped to one book: the inner join only matches rows where `bookId` belongs to
+ *  `userId`, so an author can never see another author's uploads by guessing a bookId. Newest
+ *  first, capped at 100 for the same "recent sends, not an archive" reason as listUploadsForUser. */
+export async function listUploadsForBook(userId: string, bookId: string): Promise<UploadListItem[]> {
+  const rows = await db
+    .select({ upload: authorUploads, bookTitle: books.title })
+    .from(authorUploads)
+    .innerJoin(books, and(eq(books.id, authorUploads.bookId), eq(books.userId, userId)))
+    .where(and(eq(authorUploads.bookId, bookId), eq(authorUploads.userId, userId)))
+    .orderBy(desc(authorUploads.createdAt))
+    .limit(100);
+
+  return rows.map(({ upload, bookTitle }) => ({
+    id: upload.id,
+    bookId: upload.bookId,
+    bookTitle: bookTitle ?? null,
+    kind: upload.kind,
+    fileName: upload.fileName,
+    sizeBytes: upload.sizeBytes,
+    note: upload.note,
+    status: upload.status,
+    createdAt: upload.createdAt.toISOString(),
+  }));
+}
+
 async function countUploadsToday(userId: string): Promise<number> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const rows = await db

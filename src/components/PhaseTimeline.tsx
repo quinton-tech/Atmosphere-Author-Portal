@@ -15,6 +15,7 @@ export function PhaseTimeline({ phases }: { phases: PhaseView[] }) {
       {phases.map((phase, i) => {
         const isLast = i === phases.length - 1;
         const date = phase.enteredAt ?? phase.events[0]?.at ?? null;
+        const isInferredDone = phase.state === "done" && phase.completion === "inferred";
         const hasBody = phase.events.length > 0 || phase.milestones.length > 0 || (phase.state === "current" && phase.description);
         return (
           <li key={phase.key} className={cn("relative pl-9", !isLast && "pb-7")}>
@@ -41,13 +42,15 @@ export function PhaseTimeline({ phases }: { phases: PhaseView[] }) {
                 className={cn(
                   "font-bold",
                   phase.state === "upcoming" ? "text-muted" : "text-ink",
+                  isInferredDone && "text-ink-2",
                   phase.state === "current" && "text-lg",
                 )}
               >
                 {phase.state === "current" ? "Now: " : ""}
                 {phase.label}
               </p>
-              {date && phase.state !== "upcoming" && (
+              {phase.state !== "upcoming" && isInferredDone && <span className="eyebrow text-muted">Completed · date not recorded</span>}
+              {phase.state !== "upcoming" && !isInferredDone && date && (
                 <time dateTime={date} className="eyebrow">
                   {formatDate(date)}
                 </time>
@@ -91,7 +94,7 @@ export function PhaseTimeline({ phases }: { phases: PhaseView[] }) {
                         <>
                           {" "}
                           <a href={m.href} target="_blank" rel="noopener noreferrer" className="font-semibold text-teal-ink">
-                            View
+                            {m.linkLabel ?? "View"}
                           </a>
                         </>
                       )}

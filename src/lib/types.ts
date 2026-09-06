@@ -13,8 +13,12 @@ export type StageView = {
   /** "pipeline" rows come from HubSpot's Pipeline Stage; "derived" rows are computed from milestones. */
   kind: "pipeline" | "derived";
   isDerived: boolean;
-  /** When HubSpot recorded the book entering this pipeline stage (ISO); null for derived stages / unknown. */
+  /** The date most meaningful to the author for this phase (ISO): a real milestone/initiation/publication date
+   *  when we have one, else HubSpot's stage-entered date, else null. Migration artifacts are filtered out. */
   enteredAt: string | null;
+  /** How we know a "done" phase is done: "confirmed" (a dated event or milestone), "inferred" (the pipeline
+   *  moved past it but HubSpot has no record), or null when not done. */
+  completion: "confirmed" | "inferred" | null;
   /** "done" | "current" | "upcoming" relative to the book's current stage */
   state: "done" | "current" | "upcoming";
 };
@@ -75,6 +79,26 @@ export type TimelineEvent = {
   isFuture: boolean;
 };
 
+export type PrimaryContact = {
+  /** Role key from TEAM_ROLES, e.g. "bpm". */
+  roleKey: string;
+  /** Author-facing role label, e.g. "Book Production Manager". */
+  roleLabel: string;
+  name: string;
+  email: string | null;
+  /** Website title / photo when the team directory knows this person. */
+  title: string | null;
+  photoUrl: string | null;
+  /** One sentence: what this person handles for the author. Admin-editable. */
+  handles: string;
+};
+
+export type NextUpdate = {
+  /** e.g. "Your interior proof should reach you around" */
+  label: string;
+  at: string | null; // ISO estimate, may be null when unknown
+};
+
 export type MilestoneView = {
   id: string;
   stageKey: string;
@@ -86,6 +110,8 @@ export type MilestoneView = {
   detail: string | null;
   at: string | null; // ISO
   href: string | null;
+  /** Descriptive link text, e.g. "Read your Kirkus review". Null when href is null. */
+  linkLabel: string | null;
 };
 
 export type WebsiteView = {
@@ -117,6 +143,12 @@ export type BookDetail = BookSummary & {
   timeline: TimelineEvent[];
   /** All phases in typical-path order with their events and milestones. Primary visual. */
   phases: PhaseView[];
+  /** The one person the author should reach out to. Null if the role isn't assigned yet. */
+  primaryContact: PrimaryContact | null;
+  /** Estimated next thing the author will hear about, from typical stage durations. */
+  nextUpdate: NextUpdate | null;
+  /** Portal proxy URL of the cover image (first visible file in the "Cover" category), if any. */
+  coverHref: string | null;
   team: TeamMember[];
   milestones: MilestoneView[];
   /** Null unless the author has a website in progress (websiteUrl, websiteDomain, or websiteStatus set). */

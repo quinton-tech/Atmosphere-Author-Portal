@@ -59,7 +59,7 @@ describe("parseCitations", () => {
   });
 
   it("flags the refusal phrase as notInHandbook", () => {
-    const result = parseCitations(`${NOT_IN_HANDBOOK_PHRASE}, so please ask your Author Manager.`, sections);
+    const result = parseCitations(`${NOT_IN_HANDBOOK_PHRASE}, so please ask your main contact.`, sections);
     expect(result.notInHandbook).toBe(true);
     expect(result.citations).toEqual([]);
   });

@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ActionList } from "@/components/ActionList";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { BookHeader } from "@/components/BookHeader";
 import { LastUpdated } from "@/components/LastUpdated";
-import { PhaseTimeline } from "@/components/PhaseTimeline";
 import { NotesList } from "@/components/NotesList";
-import { StageNow } from "@/components/StageNow";
+import { PhaseTimeline } from "@/components/PhaseTimeline";
+import { PrimaryContact } from "@/components/PrimaryContact";
+import { PublishedSummary } from "@/components/PublishedSummary";
+import { StatusNow } from "@/components/StatusNow";
 import { TeamListWithDirectory } from "@/components/TeamList";
 import { WebsiteCard } from "@/components/WebsiteCard";
 import { getBookForUser } from "@/lib/data/books";
 import { effectiveUserId, requireUser } from "@/lib/session";
+import { nameKey } from "@/lib/team/parse";
 
 function suggestedQuestionsFor(stage: { label: string; isTerminal: boolean } | null): string[] {
   if (!stage) {
@@ -32,6 +34,14 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
   const book = await getBookForUser(effectiveUserId(user), bookId);
   if (!book) notFound();
 
+  const isPublished = Boolean(book.currentStage?.isTerminal);
+  const suggestedQuestions = suggestedQuestionsFor(
+    book.currentStage ? { label: book.currentStage.label, isTerminal: book.currentStage.isTerminal } : null,
+  );
+  const restOfTeam = book.primaryContact
+    ? book.team.filter((member) => nameKey(member.name) !== nameKey(book.primaryContact!.name))
+    : book.team;
+
   return (
     <div className="pb-16">
       <div className="flex flex-wrap items-start justify-between gap-6">
@@ -44,30 +54,60 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
         </Link>
       </div>
 
-      {book.actions.length > 0 && (
-        <div className="mt-8">
-          <ActionList actions={book.actions} />
-        </div>
+      <StatusNow stage={book.currentStage} actions={book.actions} nextUpdate={book.nextUpdate} />
+
+      {isPublished && (
+        <PublishedSummary
+          bookId={book.id}
+          milestones={book.milestones}
+          website={book.website}
+          suggestedQuestions={suggestedQuestions}
+        />
       )}
 
       <section className="mt-12">
-        <h2 className="eyebrow">Where your book stands</h2>
-        <div className="mt-6">
-          <PhaseTimeline phases={book.phases} />
-        </div>
-        <p className="mt-5 max-w-[72ch] text-sm text-muted">
-          Stages can repeat, overlap, or happen out of order. Dates are when your book entered each stage.
-        </p>
+        {isPublished ? (
+          <details>
+            <summary className="eyebrow cursor-pointer">Production history</summary>
+            <div className="mt-6">
+              <PhaseTimeline phases={book.phases} />
+            </div>
+            <p className="mt-5 max-w-[72ch] text-sm text-muted">
+              Stages can repeat, overlap, or happen out of order. Dates are when your book entered each stage.
+            </p>
+          </details>
+        ) : (
+          <>
+            <h2 className="eyebrow">Where your book stands</h2>
+            <div className="mt-6">
+              <PhaseTimeline phases={book.phases} />
+            </div>
+            <p className="mt-5 max-w-[72ch] text-sm text-muted">
+              Stages can repeat, overlap, or happen out of order. Dates are when your book entered each stage.
+            </p>
+          </>
+        )}
       </section>
 
-      <StageNow stage={book.currentStage} />
       {book.website && <WebsiteCard website={book.website} />}
-      <TeamListWithDirectory team={book.team} />
+
+      <section className="mt-12">
+        <h2 className="eyebrow">Your team</h2>
+        {book.primaryContact && (
+          <div className="mt-4">
+            <PrimaryContact contact={book.primaryContact} />
+          </div>
+        )}
+        <div className={book.primaryContact ? "mt-6" : "mt-4"}>
+          <TeamListWithDirectory team={restOfTeam} heading={null} />
+        </div>
+      </section>
+
       <NotesList notes={book.notes} />
       <LastUpdated syncedAt={book.syncedAt} />
 
-      <div className="mt-16">
-        <AssistantPanel bookId={book.id} suggestedQuestions={suggestedQuestionsFor(book.currentStage ? { label: book.currentStage.label, isTerminal: book.currentStage.isTerminal } : null)} />
+      <div id="assistant" className="mt-16">
+        <AssistantPanel bookId={book.id} suggestedQuestions={suggestedQuestions} />
       </div>
     </div>
   );

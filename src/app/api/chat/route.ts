@@ -63,14 +63,14 @@ export async function POST(request: Request) {
     .where(and(eq(chatMessages.userId, userId), gte(chatMessages.createdAt, startOfDayUtc)));
   if (usedToday >= CHAT_MESSAGES_MAX_PER_DAY) {
     return NextResponse.json(
-      { error: "You've reached today's limit of 40 questions. Please try again tomorrow, or ask your Author Manager directly." },
+      { error: "You've reached today's limit of 40 questions. Please try again tomorrow, or ask your main contact directly." },
       { status: 429 },
     );
   }
 
   const active = await getActiveModel();
   if (!active) {
-    return NextResponse.json({ error: "The assistant isn't set up yet. Please contact your Author Manager." }, { status: 503 });
+    return NextResponse.json({ error: "The assistant isn't set up yet. Please reach out to your main contact." }, { status: 503 });
   }
 
   // Ownership-checked: getBookForUser returns null (never data) if this user doesn't own bookId.

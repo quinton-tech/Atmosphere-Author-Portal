@@ -125,7 +125,7 @@ async function loadSyncConfig(reader: HubSpotReader): Promise<{
   propertyMap: PropertyMap;
   titleProperty: string;
   unresolved: string[];
-  owners: Map<string, string>;
+  owners: Map<string, { name: string; email: string | null }>;
   extraProperties: string[];
 }> {
   const [schema, stageRows, propertyMapSetting, titlePropertySetting, owners, milestoneRows] = await Promise.all([
@@ -138,11 +138,16 @@ async function loadSyncConfig(reader: HubSpotReader): Promise<{
     reader.getOwners().then(
       async (m) => {
         await setAppSetting("ownersUnavailable", false);
+        // Cached books store team members by *name* (see resolvePersonNames), so the primary-contact
+        // lookup in data/books.ts needs a name -> email directory, not an id -> {name, email} one.
+        const byName: Record<string, string | null> = {};
+        for (const { name, email } of m.values()) byName[name] = email;
+        await setAppSetting("owners", byName);
         return m;
       },
       async (err: unknown) => {
         await setAppSetting("ownersUnavailable", err instanceof Error ? err.message.slice(0, 200) : true);
-        return new Map<string, string>();
+        return new Map<string, { name: string; email: string | null }>();
       },
     ),
     db

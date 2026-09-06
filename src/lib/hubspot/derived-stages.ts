@@ -35,6 +35,10 @@ export type DerivedStageInput = {
  *  - none of the linked milestone ids appear in `milestones` at all (not included for this author,
  *    or the milestone was disabled/deleted) -> omit if `showWhenEmpty` is false, else "upcoming".
  *  - otherwise (milestones present but all "pending") -> "upcoming".
+ *
+ * `completion` (only meaningful when `state` is "done"): "confirmed" when a linked milestone is
+ * itself done (a real record backs it, dated or not), "inferred" when it's "done" only because the
+ * parent pipeline stage moved past it, null for every other state.
  */
 export function computeDerivedStageState(
   stage: DerivedStageInput,
@@ -47,12 +51,17 @@ export function computeDerivedStageState(
 
   const parentRow = stage.parentStageKey ? pipelineStages.find((p) => p.key === stage.parentStageKey) : undefined;
   let state: StageView["state"] = "upcoming";
+  let completion: StageView["completion"] = null;
   if (own.some((m) => m.state === "done")) {
     state = "done";
+    // A real milestone backs this phase being done, regardless of whether that milestone itself
+    // carries a date — the author sees a filled dot either way, this just says how sure we are.
+    completion = "confirmed";
   } else if (parentRow?.state === "done") {
     // The pipeline has moved past this phase's parent, so the phase is behind the book whether or
     // not HubSpot recorded a value (older projects often have gaps).
     state = "done";
+    completion = "inferred";
   } else if (own.some((m) => m.state === "in_progress" || m.state === "scheduled")) {
     const parent = parentRow;
     const parentActive = !!parent && (parent.state === "current" || parent.state === "done");
@@ -73,6 +82,7 @@ export function computeDerivedStageState(
     kind: "derived",
     isDerived: true,
     enteredAt: null,
+    completion,
     state,
   };
 }

@@ -34,7 +34,7 @@ export default async function MessagesPage() {
       {messages.length === 0 && unavailable ? (
         <EmptyState
           title="Messages aren't available yet."
-          message="Check back soon, or reach out to your Author Manager directly."
+          message="Check back soon, or reach out to your main contact directly."
         />
       ) : messages.length === 0 ? (
         <EmptyState title="No messages yet." message="Emails your team sends you will show up here." />

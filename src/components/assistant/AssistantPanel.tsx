@@ -70,8 +70,8 @@ export function AssistantPanel({ bookId, suggestedQuestions = [], className }: A
     <aside className={cn("rounded-2xl border border-line bg-surface p-6", className)}>
       <h2 className="eyebrow">Ask the Author Handbook</h2>
       <p className="mt-2 max-w-[72ch] text-ink-2">
-        Answers are grounded in the Author Handbook. For anything specific to your book — dates, money, contract terms — ask your Author
-        Manager.
+        Answers are grounded in the Author Handbook. For anything specific to your book — dates, money, contract terms — ask your main
+        contact.
       </p>
 
       {messages.length === 0 && suggestedQuestions.length > 0 && (

@@ -22,7 +22,7 @@ export function WebsiteCard({ website }: { website: WebsiteView }) {
   const isSoonOrPast = expiry ? expiry.getTime() - Date.now() <= 30 * 24 * 60 * 60 * 1000 : false;
 
   return (
-    <section className="mt-12 max-w-[72ch]">
+    <section id="website" className="mt-12 max-w-[72ch]">
       <h2 className="eyebrow">Your author website</h2>
       <p className="mt-2 text-lg font-bold text-ink">{website.status ?? "In progress"}</p>
       {domain && <p className="mt-1 text-ink-2">{domain}</p>}

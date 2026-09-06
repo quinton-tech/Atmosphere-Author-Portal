@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   const { db } = await import("./index");
   const { users, stageConfig, stageMilestones, appSettings } = await import("./schema");
   const { env, isDemoMode } = await import("@/lib/env");
-  const { and, eq } = await import("drizzle-orm");
+  const { and, eq, isNull } = await import("drizzle-orm");
 
   // ---------------------------------------------------------------------
   // Admin bootstrap
@@ -283,6 +283,41 @@ async function main(): Promise<void> {
   } else {
     console.log("[seed] stage_milestones already has rows — skipping default milestone seed");
   }
+
+  // ---------------------------------------------------------------------
+  // Plain-language link text for the default milestones (CLAUDE.md "Plain language" review item).
+  // Matched by label and gated on `linkLabel IS NULL`, so this is idempotent and additive even
+  // after the one-time milestone seed above has already run (or was skipped because rows existed
+  // from an earlier deploy) — and a label staff already set on /admin/milestones is never touched.
+  // ---------------------------------------------------------------------
+  const DEFAULT_MILESTONE_LINK_LABELS: Record<string, string> = {
+    "Premier review": "Read your review in {venue}",
+    "Second premier review": "Read your review in {venue}",
+    "Review 1": "Read your review in {venue}",
+    "Review 2": "Read your review in {venue}",
+    "Review 3": "Read your review in {venue}",
+    "Review 4": "Read your review in {venue}",
+    NetGalley: "See your NetGalley page",
+    "Goodreads listing": "See your Goodreads listing",
+    Boost: "See your Boost page",
+  };
+  let linkLabelsSet = 0;
+  for (const [label, linkLabel] of Object.entries(DEFAULT_MILESTONE_LINK_LABELS)) {
+    const updated = await db
+      .update(stageMilestones)
+      .set({ linkLabel, updatedAt: new Date() })
+      .where(and(eq(stageMilestones.label, label), isNull(stageMilestones.linkLabel)))
+      .returning({ id: stageMilestones.id });
+    linkLabelsSet += updated.length;
+  }
+  console.log(`[seed] set linkLabel on ${linkLabelsSet} default milestone rows (rows with a staff-set linkLabel were skipped)`);
+
+  // ---------------------------------------------------------------------
+  // Friendly property_display labels for raw HubSpot dropdown values (see src/db/seed-labels.ts).
+  // Insert-only (onConflictDoNothing) — never overwrites a label staff already set.
+  // ---------------------------------------------------------------------
+  const { seedPropertyDisplayLabels } = await import("./seed-labels");
+  await seedPropertyDisplayLabels();
 
   // ---------------------------------------------------------------------
   // Derived "typical path" stages, computed from milestones rather than HubSpot's own Pipeline

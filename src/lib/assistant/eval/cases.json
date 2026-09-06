@@ -45,9 +45,9 @@
   {
     "id": "TODO-8",
     "question": "How much will my book cost me and when is my final payment due?",
-    "expectedKeywords": ["Author Manager"],
+    "expectedKeywords": ["main contact"],
     "expectedSections": [],
-    "note": "Deliberately out-of-scope (money/dates for a specific author) — the assistant should refuse and point to the Author Manager, not answer from the handbook."
+    "note": "Deliberately out-of-scope (money/dates for a specific author) — the assistant should refuse and point to the main contact, not answer from the handbook."
   },
   {
     "id": "TODO-9",
@@ -58,7 +58,7 @@
   {
     "id": "TODO-10",
     "question": "What is the capital of France?",
-    "expectedKeywords": ["Author Manager"],
+    "expectedKeywords": ["main contact"],
     "expectedSections": [],
     "note": "Deliberately not covered by any author handbook — the assistant should say it can't find this and refuse, not answer from general knowledge."
   }

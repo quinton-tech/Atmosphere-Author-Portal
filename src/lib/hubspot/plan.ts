@@ -50,12 +50,15 @@ const ENUM_PROPERTY_IDS = new Set(PROJECT_PROPERTIES.filter((p) => p.kind === "e
 const PERSON_PROPERTY_IDS = PROJECT_PROPERTIES.filter((p) => p.kind === "person").map((p) => p.id);
 
 /** Team fields hold HubSpot owner ids; swap in names when we have them, else leave the id. */
-export function resolvePersonNames(props: Record<string, string | null>, owners: Map<string, string> | undefined): Record<string, string | null> {
+export function resolvePersonNames(
+  props: Record<string, string | null>,
+  owners: Map<string, { name: string; email: string | null }> | undefined,
+): Record<string, string | null> {
   if (!owners?.size) return props;
   const out = { ...props };
   for (const id of PERSON_PROPERTY_IDS) {
     const v = out[id];
-    if (v && owners.has(v)) out[id] = owners.get(v)!;
+    if (v && owners.has(v)) out[id] = owners.get(v)!.name;
   }
   return out;
 }
@@ -65,7 +68,12 @@ export function planSync(
   contacts: Map<string, HubSpotContactSummary>,
   stages: Pick<StageConfig, "key" | "hubspotValues">[],
   propertyMap: PropertyMap,
-  opts: { titleProperty?: string; stageProperty?: string; owners?: Map<string, string>; extraProperties?: string[] } = {},
+  opts: {
+    titleProperty?: string;
+    stageProperty?: string;
+    owners?: Map<string, { name: string; email: string | null }>;
+    extraProperties?: string[];
+  } = {},
 ): SyncPlan {
   const titleProperty = opts.titleProperty ?? "name";
   const usersByEmail = new Map<string, PlannedUser>();
@@ -124,7 +132,7 @@ export async function fetchAndPlanPage(
     stages: Pick<StageConfig, "key" | "hubspotValues">[];
     propertyMap: PropertyMap;
     titleProperty: string;
-    owners?: Map<string, string>;
+    owners?: Map<string, { name: string; email: string | null }>;
     extraProperties?: string[];
   },
 ): Promise<{ plan: SyncPlan; nextAfter?: string }> {

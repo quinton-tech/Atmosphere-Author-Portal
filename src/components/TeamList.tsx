@@ -18,12 +18,20 @@ function firstName(name: string): string {
   return name.replace(/^(dr|mr|mrs|ms)\.?\s+/i, "").split(/\s+/)[0] || name;
 }
 
-export function TeamList({ team, directory }: { team: TeamMember[]; directory?: TeamDirectory }) {
+export function TeamList({
+  team,
+  directory,
+  heading = "Your team",
+}: {
+  team: TeamMember[];
+  directory?: TeamDirectory;
+  /** Pass null to render just the grid — e.g. when a caller already put its own "Your team"
+   *  heading above (and a PrimaryContact) and doesn't want it duplicated. */
+  heading?: string | null;
+}) {
   if (team.length === 0) return null;
-  return (
-    <section className="mt-12">
-      <h2 className="eyebrow">Your team</h2>
-      <ul className="mt-4 grid gap-4 sm:grid-cols-2">
+  const grid = (
+      <ul className="grid gap-4 sm:grid-cols-2">
         {team.map((member, i) => {
           const match = lookup(directory, member.name);
           return (
@@ -59,6 +67,13 @@ export function TeamList({ team, directory }: { team: TeamMember[]; directory?: 
           );
         })}
       </ul>
+  );
+
+  if (heading === null) return grid;
+  return (
+    <section className="mt-12">
+      <h2 className="eyebrow">{heading}</h2>
+      <div className="mt-4">{grid}</div>
     </section>
   );
 }
@@ -67,7 +82,13 @@ export function TeamList({ team, directory }: { team: TeamMember[]; directory?: 
  * Convenience wrapper that fetches the directory itself, so wiring it into a page is a one-line
  * swap from `<TeamList team={...} />`.
  */
-export async function TeamListWithDirectory({ team }: { team: TeamMember[] }) {
+export async function TeamListWithDirectory({
+  team,
+  heading,
+}: {
+  team: TeamMember[];
+  heading?: string | null;
+}) {
   const directory = await getTeamDirectory();
-  return <TeamList team={team} directory={directory} />;
+  return <TeamList team={team} directory={directory} heading={heading} />;
 }

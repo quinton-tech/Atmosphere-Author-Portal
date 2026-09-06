@@ -196,6 +196,17 @@ export function MilestoneFields({
         />
       </div>
 
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field
+          name="linkLabel"
+          label="Link text"
+          placeholder="e.g. Read your {venue} review"
+          defaultValue={milestone?.linkLabel ?? ""}
+          hint="e.g. Read your {venue} review"
+          className="sm:col-span-2"
+        />
+      </div>
+
       <div className="rounded-md border border-line bg-bg p-3">
         <p className="eyebrow mb-2">Include rule (blank = everyone; matches ANY of the below)</p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
