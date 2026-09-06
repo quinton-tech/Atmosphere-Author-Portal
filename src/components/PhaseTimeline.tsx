@@ -55,6 +55,7 @@ export function PhaseTimeline({ phases }: { phases: PhaseView[] }) {
                   {formatDate(date)}
                 </time>
               )}
+              {phase.state === "done" && !isInferredDone && !date && <span className="eyebrow">Completed</span>}
               {phase.state === "upcoming" && phase.typicalWeeks && (
                 <span className="eyebrow">About {phase.typicalWeeks} weeks</span>
               )}
@@ -69,7 +70,7 @@ export function PhaseTimeline({ phases }: { phases: PhaseView[] }) {
                   <li key={e.id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
                     <span className="text-ink-2">{e.title}</span>
                     {e.detail && <span className="text-muted">· {e.detail}</span>}
-                    {e.at && (
+                    {e.at && !(date && e.at.slice(0, 10) === date.slice(0, 10)) && (
                       <time dateTime={e.at} className="text-muted">
                         · {formatDate(e.at)}
                       </time>
