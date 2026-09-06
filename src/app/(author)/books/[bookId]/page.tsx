@@ -4,12 +4,10 @@ import { ActionList } from "@/components/ActionList";
 import { AssistantPanel } from "@/components/assistant/AssistantPanel";
 import { BookHeader } from "@/components/BookHeader";
 import { LastUpdated } from "@/components/LastUpdated";
-import { MilestoneList } from "@/components/MilestoneList";
+import { PhaseTimeline } from "@/components/PhaseTimeline";
 import { NotesList } from "@/components/NotesList";
 import { StageNow } from "@/components/StageNow";
 import { TeamListWithDirectory } from "@/components/TeamList";
-import { Timeline } from "@/components/Timeline";
-import { TypicalPath } from "@/components/TypicalPath";
 import { WebsiteCard } from "@/components/WebsiteCard";
 import { getBookForUser } from "@/lib/data/books";
 import { effectiveUserId, requireUser } from "@/lib/session";
@@ -54,14 +52,15 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
 
       <section className="mt-12">
         <h2 className="eyebrow">Where your book stands</h2>
-        <div className="mt-5">
-          <Timeline events={book.timeline} />
+        <div className="mt-6">
+          <PhaseTimeline phases={book.phases} />
         </div>
-        <TypicalPath stages={book.stages} milestones={book.milestones} />
+        <p className="mt-5 max-w-[72ch] text-sm text-muted">
+          Stages can repeat, overlap, or happen out of order. Dates are when your book entered each stage.
+        </p>
       </section>
 
       <StageNow stage={book.currentStage} />
-      <MilestoneList milestones={book.milestones} />
       {book.website && <WebsiteCard website={book.website} />}
       <TeamListWithDirectory team={book.team} />
       <NotesList notes={book.notes} />

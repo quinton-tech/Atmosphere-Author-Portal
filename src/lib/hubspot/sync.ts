@@ -158,12 +158,16 @@ async function loadSyncConfig(reader: HubSpotReader): Promise<{
   ]);
   const { map, unresolved } = resolveInternalNames(schema.properties, propertyMapSetting ?? {});
 
+  // HubSpot records when a Project entered each pipeline stage ("Date entered \"Editorial (…)\""),
+  // which gives the author timeline a real date per phase. The property name embeds the stage id.
+  const stageEnteredProps = schema.properties.filter((p) => /^hs_v2_date_entered_/.test(p.name)).map((p) => p.name);
   const extraProperties = [
-    ...new Set(
-      milestoneRows.flatMap((m) => [m.propertyName, m.linkProperty, m.dateProperty, m.venueProperty, m.includeRule?.property?.name]).filter(
+    ...new Set([
+      ...milestoneRows.flatMap((m) => [m.propertyName, m.linkProperty, m.dateProperty, m.venueProperty, m.includeRule?.property?.name]).filter(
         (v): v is string => !!v,
       ),
-    ),
+      ...stageEnteredProps,
+    ]),
   ];
 
   const schemaSummary: ProjectSchemaEntry[] = schema.properties.map((p) => ({

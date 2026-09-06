@@ -1,5 +1,6 @@
 import type { BookDetail } from "@/lib/types";
 import { formatDate } from "./format";
+import { TeaserToggle } from "./TeaserToggle";
 
 export function BookHeader({
   book,
@@ -15,18 +16,7 @@ export function BookHeader({
           {new Date(book.publicationDate).getTime() <= Date.now() ? "Published" : "Publishing"} {formatDate(book.publicationDate)}
         </p>
       )}
-      {book.teaser && book.teaser.length <= 480 && (
-        <p className="mt-4 border-l-2 border-teal pl-4 text-lg text-ink-2">{book.teaser}</p>
-      )}
-      {book.teaser && book.teaser.length > 480 && (
-        <details className="mt-4 border-l-2 border-teal pl-4 text-lg text-ink-2">
-          <summary className="cursor-pointer list-none">
-            {book.teaser.slice(0, 380).replace(/\s+\S*$/, "")}…{" "}
-            <span className="text-base font-medium text-teal-ink">Read more</span>
-          </summary>
-          <p className="mt-3">{book.teaser}</p>
-        </details>
-      )}
+      {book.teaser && <TeaserToggle text={book.teaser} />}
     </header>
   );
 }

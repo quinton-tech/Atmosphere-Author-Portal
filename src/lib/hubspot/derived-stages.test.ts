@@ -34,17 +34,17 @@ describe("computeDerivedStageState", () => {
     expect(view?.state).toBe("current");
   });
 
-  it("is current when in-progress, the parent pipeline stage is already done, and nothing later than the parent is current", () => {
+  it("is done when the parent pipeline stage is already done, even if a milestone is still in progress", () => {
     const parentDoneNoLaterCurrent = [pipeline("proofreading", 30, "done"), pipeline("interior_design", 60, "upcoming")];
     const view = computeDerivedStageState(stage({ parentStageKey: "proofreading" }), [{ id: "m1", state: "scheduled" }], parentDoneNoLaterCurrent);
-    expect(view?.state).toBe("current");
+    expect(view?.state).toBe("done");
   });
 
-  it("is upcoming when in-progress, the parent is done, but a stage after the parent is already current", () => {
+  it("is done when the parent is done and the pipeline has moved further on", () => {
     // e.g. cold_reading's parent (proofreading) finished and the pipeline has since moved on to
-    // interior_design — a stale in-progress cold-reading milestone shouldn't read as "now".
+    // interior_design — the phase is behind the book regardless of a stale milestone value.
     const view = computeDerivedStageState(stage({ parentStageKey: "proofreading" }), [{ id: "m1", state: "scheduled" }], pipelineStages);
-    expect(view?.state).toBe("upcoming");
+    expect(view?.state).toBe("done");
   });
 
   it("is upcoming when in-progress but the parent pipeline stage hasn't started", () => {

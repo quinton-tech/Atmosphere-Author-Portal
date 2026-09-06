@@ -27,6 +27,7 @@ export type DerivedStageInput = {
  *
  * State rules:
  *  - any linked milestone is "done" -> "done"
+ *  - else the parent pipeline stage is "done" (book moved past it) -> "done"
  *  - else any linked milestone is "in_progress"/"scheduled" -> "current", but ONLY if the parent
  *    pipeline stage is itself "current" or "done" AND no later pipeline stage (by sortOrder) is
  *    "current" — otherwise "upcoming" (the derived step can't be "now" if the pipeline has already
@@ -44,11 +45,16 @@ export function computeDerivedStageState(
 
   if (own.length === 0 && !stage.showWhenEmpty) return null;
 
+  const parentRow = stage.parentStageKey ? pipelineStages.find((p) => p.key === stage.parentStageKey) : undefined;
   let state: StageView["state"] = "upcoming";
   if (own.some((m) => m.state === "done")) {
     state = "done";
+  } else if (parentRow?.state === "done") {
+    // The pipeline has moved past this phase's parent, so the phase is behind the book whether or
+    // not HubSpot recorded a value (older projects often have gaps).
+    state = "done";
   } else if (own.some((m) => m.state === "in_progress" || m.state === "scheduled")) {
-    const parent = stage.parentStageKey ? pipelineStages.find((p) => p.key === stage.parentStageKey) : undefined;
+    const parent = parentRow;
     const parentActive = !!parent && (parent.state === "current" || parent.state === "done");
     // "Later" is relative to the parent, not this derived stage's own sortOrder — a derived stage
     // is deliberately sorted right before/under its parent, so the parent itself (sortOrder >=
@@ -66,6 +72,7 @@ export function computeDerivedStageState(
     isTerminal: false,
     kind: "derived",
     isDerived: true,
+    enteredAt: null,
     state,
   };
 }

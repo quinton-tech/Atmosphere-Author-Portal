@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { actionRules, appSettings, bookCache, books, notes, propertyDisplay, stageConfig, stageMilestones, visibleFiles } from "@/db/schema";
-import type { AuthorInfo, BookDetail, BookSummary, StageView, TimelineEvent, WebsiteView } from "@/lib/types";
+import type { AuthorInfo, BookDetail, BookSummary, MilestoneView, PhaseView, StageView, TimelineEvent, WebsiteView } from "@/lib/types";
 import { computeDerivedStages } from "@/lib/hubspot/derived-stages";
 import { evaluateActionRules } from "@/lib/hubspot/rules";
 import { evaluateMilestones } from "@/lib/hubspot/milestones";
@@ -138,6 +138,7 @@ export async function getBookForUser(
     isTerminal: s.isTerminal,
     kind: "pipeline",
     isDerived: false,
+    enteredAt: stageEnteredAt(props, s.hubspotValues),
     state: pipelineIdx === -1 ? "upcoming" : i < pipelineIdx ? "done" : i === pipelineIdx ? "current" : "upcoming",
   }));
   const currentStage = pipelineViews.find((s) => s.state === "current") ?? null;
@@ -155,10 +156,11 @@ export async function getBookForUser(
       isFuture: m.state === "scheduled",
     }));
 
-  // Authors see done / in-progress / scheduled milestones anywhere, but "pending" ones only for
-  // stages they've reached — a book in Interior Design shouldn't list every future publicity item.
-  const reachedStageKeys = new Set(pipelineViews.filter((s) => s.state !== "upcoming").map((s) => s.key));
-  const visibleMilestones = milestones.filter((m) => m.state !== "pending" || reachedStageKeys.has(m.stageKey));
+  // Authors see done / in-progress / scheduled milestones anywhere, but "pending" ones only for the
+  // current stage: future stages would be noise, and a past stage with no recorded value is a
+  // HubSpot gap, not an undone task.
+  const currentStageKeys = new Set(pipelineViews.filter((s) => s.state === "current").map((s) => s.key));
+  const visibleMilestones = milestones.filter((m) => m.state !== "pending" || currentStageKeys.has(m.stageKey));
 
   const derivedViews = computeDerivedStages(
     derivedRows.map((s) => ({
@@ -174,6 +176,7 @@ export async function getBookForUser(
     pipelineViews,
   );
   const stageViews = [...pipelineViews, ...derivedViews].sort((a, b) => a.sortOrder - b.sortOrder);
+  const phases = buildPhases(stageViews, derivedRows, buildTimeline(props, stages, currentKey, labels, now, []), visibleMilestones);
 
   return {
     id: book.id,
@@ -183,6 +186,7 @@ export async function getBookForUser(
     isArchived: !!book.archivedAt,
     updatedAt: (cache?.hubspotUpdatedAt ?? book.updatedAt).toISOString(),
     stages: stageViews,
+    phases,
     currentStage,
     timeline: buildTimeline(props, stages, currentKey, labels, now, milestoneEvents),
     team: buildTeam(props, labels),
@@ -244,4 +248,61 @@ export async function getVisibleFileForUser(userId: string, fileId: string) {
     .where(and(eq(visibleFiles.id, fileId), eq(books.userId, userId)))
     .limit(1);
   return row ?? null;
+}
+
+
+/** HubSpot's "Date entered <stage>" property for a pipeline stage, looked up by the stage id embedded in its name. */
+function stageEnteredAt(props: Record<string, string | null>, hubspotValues: string[]): string | null {
+  for (const raw of hubspotValues) {
+    const idPart = raw.replace(/-/g, "_");
+    if (!/^[0-9a-f_]+$/i.test(idPart)) continue;
+    const prefix = `hs:hs_v2_date_entered_${idPart}`;
+    for (const [k, v] of Object.entries(props)) {
+      if (k.startsWith(prefix) && v) {
+        const d = parseDate(v);
+        if (d) return d.toISOString();
+      }
+    }
+  }
+  return null;
+}
+
+/** Which stage each dated event belongs to on the phase timeline. */
+const EVENT_STAGE: Record<string, string[]> = {
+  initiation: ["onboarding"],
+  developmentalEditorAssigned: ["editorial", "developmental_editing"],
+  proofreaderAssigned: ["proofreading"],
+  coverDesignerAssigned: ["cover_design", "interior_design"],
+  interiorDesignerAssigned: ["interior_design"],
+};
+
+function buildPhases(
+  stageViews: StageView[],
+  derivedRows: { key: string; derivedMilestoneIds: string[] }[],
+  events: TimelineEvent[],
+  milestones: MilestoneView[],
+): PhaseView[] {
+  const keys = new Set(stageViews.map((s) => s.key));
+  const phases: PhaseView[] = stageViews.map((s) => ({ ...s, events: [], milestones: [] }));
+  const byKey = new Map(phases.map((p) => [p.key, p]));
+  const terminal = phases.find((p) => p.isTerminal) ?? phases[phases.length - 1];
+
+  for (const e of events) {
+    if (e.kind === "current") continue; // the current phase is highlighted by its own state
+    if (e.id === "publication") {
+      terminal?.events.push(e);
+      continue;
+    }
+    const target = (EVENT_STAGE[e.id] ?? []).find((k) => keys.has(k));
+    if (target) byKey.get(target)!.events.push(e);
+  }
+
+  for (const m of milestones) {
+    const derived = derivedRows.find((d) => d.derivedMilestoneIds.includes(m.id));
+    const target = derived && keys.has(derived.key) ? derived.key : keys.has(m.stageKey) ? m.stageKey : null;
+    if (target) byKey.get(target)!.milestones.push(m);
+  }
+
+  for (const p of phases) p.events.sort((a, b) => a.at.localeCompare(b.at));
+  return phases;
 }

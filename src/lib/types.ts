@@ -13,8 +13,16 @@ export type StageView = {
   /** "pipeline" rows come from HubSpot's Pipeline Stage; "derived" rows are computed from milestones. */
   kind: "pipeline" | "derived";
   isDerived: boolean;
+  /** When HubSpot recorded the book entering this pipeline stage (ISO); null for derived stages / unknown. */
+  enteredAt: string | null;
   /** "done" | "current" | "upcoming" relative to the book's current stage */
   state: "done" | "current" | "upcoming";
+};
+
+/** One row of the author-facing phase timeline: a stage plus everything that happened in it. */
+export type PhaseView = StageView & {
+  events: TimelineEvent[];
+  milestones: MilestoneView[];
 };
 
 export type ActionItem = {
@@ -107,6 +115,8 @@ export type BookDetail = BookSummary & {
   currentStage: StageView | null;
   /** Event-based timeline derived from dated HubSpot properties. This is the primary visual. */
   timeline: TimelineEvent[];
+  /** All phases in typical-path order with their events and milestones. Primary visual. */
+  phases: PhaseView[];
   team: TeamMember[];
   milestones: MilestoneView[];
   /** Null unless the author has a website in progress (websiteUrl, websiteDomain, or websiteStatus set). */
