@@ -170,7 +170,7 @@ export async function getBookForUser(
       showWhenEmpty: s.showWhenEmpty,
       milestoneIds: s.derivedMilestoneIds,
     })),
-    milestones: visibleMilestones,
+    milestones,
     pipelineViews,
   );
   const stageViews = [...pipelineViews, ...derivedViews].sort((a, b) => a.sortOrder - b.sortOrder);
