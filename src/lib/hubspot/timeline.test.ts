@@ -68,3 +68,14 @@ describe("timeline + team", () => {
     expect(team[2].assignedAt).toBeNull();
   });
 });
+
+describe("display helpers", () => {
+  it("hides raw owner ids and cleans multi-block teasers", async () => {
+    const { displayPersonName, cleanTeaser } = await import("./timeline");
+    expect(displayPersonName("82246912")).toBe("Assigned");
+    expect(displayPersonName("Sam Lee")).toBe("Sam Lee");
+    expect(displayPersonName("")).toBeNull();
+    expect(cleanTeaser("A tale of two cities. HARDCOVER FLAP TEXT: There's a new witch afoot.")).toBe("A tale of two cities.");
+    expect(cleanTeaser("Plain teaser with a colon: fine.")).toBe("Plain teaser with a colon: fine.");
+  });
+});

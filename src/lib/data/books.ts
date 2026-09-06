@@ -5,7 +5,7 @@ import { actionRules, bookCache, books, notes, propertyDisplay, stageConfig, vis
 import type { AuthorInfo, BookDetail, BookSummary, StageView } from "@/lib/types";
 import { evaluateActionRules } from "@/lib/hubspot/rules";
 import { resolveStageKey } from "@/lib/hubspot/stages";
-import { buildTeam, buildTimeline, friendly, parseDate, type DisplayLabels } from "@/lib/hubspot/timeline";
+import { buildTeam, buildTimeline, cleanTeaser, friendly, parseDate, type DisplayLabels } from "@/lib/hubspot/timeline";
 
 /**
  * All data access for books is scoped by userId. There is deliberately no
@@ -93,7 +93,7 @@ export async function getBookForUser(
     timeline: buildTimeline(props, stages, currentKey, labels),
     team: buildTeam(props, labels),
     package: friendly("package", props.package, labels),
-    teaser: props.teaser ?? null,
+    teaser: cleanTeaser(props.teaser),
     initiationDate: parseDate(props.initiationDate)?.toISOString() ?? null,
     publicationDate: parseDate(props.publicationDate)?.toISOString() ?? null,
     actions: evaluateActionRules(props, rules),

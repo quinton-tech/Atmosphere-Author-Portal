@@ -12,13 +12,16 @@ import { TypicalPath } from "@/components/TypicalPath";
 import { getBookForUser } from "@/lib/data/books";
 import { effectiveUserId, requireUser } from "@/lib/session";
 
-function suggestedQuestionsFor(stageLabel: string | null): string[] {
-  if (!stageLabel) {
+function suggestedQuestionsFor(stage: { label: string; isTerminal: boolean } | null): string[] {
+  if (!stage) {
     return ["What happens next with my book?", "Who's on my team right now?"];
   }
+  if (stage.isTerminal) {
+    return ["How do royalties and payments work after publication?", "How do I order more copies of my book?", "What can I do to keep promoting my book?"];
+  }
   return [
-    `What happens during ${stageLabel}?`,
-    `How long does ${stageLabel} usually take?`,
+    `What happens during ${stage.label}?`,
+    `How long does ${stage.label} usually take?`,
     "What do I need to do right now?",
   ];
 }
@@ -61,7 +64,7 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
       <LastUpdated syncedAt={book.syncedAt} />
 
       <div className="mt-16">
-        <AssistantPanel bookId={book.id} suggestedQuestions={suggestedQuestionsFor(book.currentStage?.label ?? null)} />
+        <AssistantPanel bookId={book.id} suggestedQuestions={suggestedQuestionsFor(book.currentStage ? { label: book.currentStage.label, isTerminal: book.currentStage.isTerminal } : null)} />
       </div>
     </div>
   );

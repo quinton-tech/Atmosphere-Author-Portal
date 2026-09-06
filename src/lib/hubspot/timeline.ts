@@ -22,6 +22,21 @@ export function friendly(propertyId: string, raw: string | null | undefined, lab
     .replace(/^\w/, (c) => c.toUpperCase());
 }
 
+/** Teaser fields sometimes carry several labelled blocks ("HARDCOVER FLAP TEXT: …"). Keep the first. */
+export function cleanTeaser(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const first = raw.split(/\s+[A-Z][A-Z' ]{4,}:\s+/)[0]?.trim();
+  return first || null;
+}
+
+/** Owner ids that couldn't be resolved to a name (missing owners scope) must never reach an author. */
+export function displayPersonName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (!v) return null;
+  return /^\d+$/.test(v) ? "Assigned" : v;
+}
+
 export function parseDate(v: string | null | undefined): Date | null {
   if (!v) return null;
   // HubSpot date properties arrive as ms epoch strings or ISO dates.
@@ -33,7 +48,7 @@ export function parseDate(v: string | null | undefined): Date | null {
 export function buildTeam(props: Record<string, string | null>, labels: DisplayLabels): TeamMember[] {
   const out: TeamMember[] = [];
   for (const r of TEAM_ROLES) {
-    const name = props[r.person];
+    const name = displayPersonName(props[r.person]);
     if (!name) continue;
     const assigned = "assigned" in r ? parseDate(props[r.assigned]) : null;
     const status = "status" in r ? friendly(r.status, props[r.status], labels) : null;
@@ -60,9 +75,10 @@ export function buildTimeline(
   for (const r of TEAM_ROLES) {
     if (!("assigned" in r)) continue;
     const at = parseDate(props[r.assigned]);
-    const name = props[r.person];
+    const name = displayPersonName(props[r.person]);
+    const nameDetail = name === "Assigned" ? null : name;
     const status = "status" in r ? friendly(r.status, props[r.status], labels) : null;
-    push(r.assigned, at, `${r.role} assigned`, [name, status].filter(Boolean).join(" · ") || null, "assignment");
+    push(r.assigned, at, `${r.role} assigned`, [nameDetail, status].filter(Boolean).join(" · ") || null, "assignment");
   }
 
   push("publication", parseDate(props.publicationDate), "Publication", null, "milestone");
