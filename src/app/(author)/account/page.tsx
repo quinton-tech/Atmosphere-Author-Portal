@@ -74,15 +74,8 @@ export default async function AccountPage({
   searchParams: Promise<{
     contact?: string;
     password?: string;
-    // Echoed back on a contact-save error so the author doesn't lose what they typed (see the
-    // report to the lead: `updateContactInfoAction` doesn't append these yet, so until it does
-    // these will simply be absent and the form falls back to the saved profile values below).
-    phone?: string;
-    street?: string;
-    city?: string;
-    region?: string;
-    postalCode?: string;
-    country?: string;
+    /** Name of the contact field that failed validation (never a value). */
+    field?: string;
   }>;
 }) {
   const user = await requireUser();
@@ -92,6 +85,7 @@ export default async function AccountPage({
   // later Project sync can silently overwrite — see the doc comment on `getAuthorProfile`.
   const [info, hasPassword, sp] = await Promise.all([getAuthorProfile(userId), hasPasswordHash(user.id), searchParams]);
   const { contact, password } = sp;
+  const invalidField = typeof sp.field === "string" ? sp.field : null;
   const contactMsg = contact ? CONTACT_MESSAGES[contact] : null;
   const passwordMsg = password ? PASSWORD_MESSAGES[password] : null;
   const passwordFields = new Set(passwordMsg?.fields ?? []);
@@ -120,20 +114,20 @@ export default async function AccountPage({
           <Field
             label="State / region"
             name="region"
-            defaultValue={sp.region ?? info?.region ?? ""}
-            invalid={contact === "invalid"}
+            defaultValue={info?.region ?? ""}
+            invalid={contact === "invalid" && invalidField === "region"}
           />
           <Field
             label="Postal code"
             name="postalCode"
-            defaultValue={sp.postalCode ?? info?.postalCode ?? ""}
-            invalid={contact === "invalid"}
+            defaultValue={info?.postalCode ?? ""}
+            invalid={contact === "invalid" && invalidField === "postalCode"}
           />
           <Field
             label="Country"
             name="country"
-            defaultValue={sp.country ?? info?.country ?? ""}
-            invalid={contact === "invalid"}
+            defaultValue={info?.country ?? ""}
+            invalid={contact === "invalid" && invalidField === "country"}
           />
           <div className="sm:col-span-2">
             <SubmitButton pendingText="Saving…">Save contact details</SubmitButton>
