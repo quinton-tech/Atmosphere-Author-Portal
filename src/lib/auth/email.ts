@@ -106,6 +106,27 @@ export async function sendUploadNotificationEmail(
   });
 }
 
+/**
+ * Fires after any successful password change or reset (see `password.ts`, which resolves
+ * `signInUrl` the same way it resolves the reset-link base URL). No CTA URL to click other than
+ * "go sign in", since the shell template requires one.
+ */
+export async function sendPasswordChangedEmail(to: string, signInUrl: string): Promise<void> {
+  await client().emails.send({
+    from: env.EMAIL_FROM,
+    to,
+    subject: "Your Author Portal password was changed",
+    html: shell({
+      preheader: "Your password was just changed.",
+      heading: "Password changed",
+      body: "Your Atmosphere Author Portal password was changed. If this wasn't you, contact your main contact right away — your other sessions have been signed out.",
+      ctaLabel: "Sign in",
+      ctaUrl: signInUrl,
+    }),
+    text: `Your Atmosphere Author Portal password was changed. If this wasn't you, contact your main contact right away — your other sessions have been signed out.\n\n${signInUrl}`,
+  });
+}
+
 export async function sendPasswordResetEmail(to: string, url: string): Promise<void> {
   await client().emails.send({
     from: env.EMAIL_FROM,

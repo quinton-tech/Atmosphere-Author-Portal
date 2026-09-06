@@ -1,7 +1,7 @@
 import "server-only";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { appSettings, chatMessages, users } from "@/db/schema";
+import { appSettings, books, chatMessages, users } from "@/db/schema";
 import { PAGE_SIZE, decodeCursor, encodeCursor } from "../_lib/cursor";
 
 export type AssistantSettings = { provider: "anthropic" | "openai" | "google" | null; model: string | null };
@@ -41,4 +41,19 @@ export async function listChatMessages(opts: {
     hasMore && last ? encodeCursor({ createdAt: last.message.createdAt.toISOString(), id: last.message.id } satisfies Cursor) : null;
 
   return { rows: page.map((r) => ({ ...r.message, userEmail: r.userEmail })), nextCursor };
+}
+
+export type ChatMessageDetail = typeof chatMessages.$inferSelect & { userEmail: string; bookTitle: string | null };
+
+/** One chat message with its author's email and book title, for `/admin/assistant/[id]`. */
+export async function getChatMessageDetail(id: string): Promise<ChatMessageDetail | null> {
+  const [row] = await db
+    .select({ message: chatMessages, userEmail: users.email, bookTitle: books.title })
+    .from(chatMessages)
+    .innerJoin(users, eq(users.id, chatMessages.userId))
+    .leftJoin(books, eq(books.id, chatMessages.bookId))
+    .where(eq(chatMessages.id, id))
+    .limit(1);
+  if (!row) return null;
+  return { ...row.message, userEmail: row.userEmail, bookTitle: row.bookTitle };
 }

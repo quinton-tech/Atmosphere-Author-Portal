@@ -8,7 +8,7 @@ import { requireAdmin } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import type { ActionItem } from "@/lib/types";
 import { redirectWithFlash, runAction } from "../_lib/flash";
-import { previewRulesForEmail } from "./queries";
+import { previewRulesForBook, type PreviewBookOption, type RulePreviewDetail } from "./queries";
 
 const LIST_PATH = "/admin/rules";
 
@@ -101,13 +101,22 @@ export async function deleteRuleAction(id: string): Promise<void> {
   );
 }
 
-export type PreviewState = { email?: string; bookTitle?: string; actions?: ActionItem[]; error?: string };
+export type PreviewState = {
+  email?: string;
+  bookId?: string;
+  bookTitle?: string;
+  books?: PreviewBookOption[];
+  actions?: ActionItem[];
+  details?: RulePreviewDetail[];
+  error?: string;
+};
 
 export async function previewRuleAction(_prev: PreviewState, formData: FormData): Promise<PreviewState> {
   await requireAdmin();
   const email = String(formData.get("email") ?? "").trim();
   if (!email) return { error: "Enter an author email." };
-  const result = await previewRulesForEmail(email);
+  const bookId = String(formData.get("bookId") ?? "").trim() || undefined;
+  const result = await previewRulesForBook(email, bookId);
   if ("error" in result) return { email, error: result.error };
-  return { email, bookTitle: result.bookTitle, actions: result.actions };
+  return { email, bookId: result.bookId, bookTitle: result.bookTitle, books: result.books, actions: result.actions, details: result.details };
 }

@@ -18,6 +18,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { sessions } from "@/db/schema";
 import { sessionCookieName, secureCookiesEnabled, TWO_FA_COOKIE_NAME, signTwoFactorCookie } from "./cookies";
@@ -49,6 +50,19 @@ export async function setSessionCookie(token: string, expires: Date): Promise<vo
 export async function getSessionToken(): Promise<string | undefined> {
   const jar = await cookies();
   return jar.get(sessionCookieName())?.value;
+}
+
+/**
+ * Deletes every database session for `userId` except `keepToken` (pass `null` to revoke all of
+ * them). Used after a password change/reset so a stolen-but-not-yet-noticed session is cut off
+ * immediately — the "change" path keeps the caller's own current session alive by passing its
+ * token; the "reset" path (no authenticated session to preserve) passes `null`.
+ */
+export async function revokeOtherSessions(userId: string, keepToken: string | null): Promise<void> {
+  const condition = keepToken
+    ? and(eq(sessions.userId, userId), ne(sessions.sessionToken, keepToken))
+    : eq(sessions.userId, userId);
+  await db.delete(sessions).where(condition);
 }
 
 /** Marks the current admin's session as 2FA-verified for the rest of today (UTC). */

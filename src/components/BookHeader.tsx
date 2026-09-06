@@ -2,11 +2,13 @@ import type { BookDetail } from "@/lib/types";
 import { formatDate } from "./format";
 
 /** Compact header: cover on the left when we have one, title/dates to the right, synopsis tucked
- *  behind a disclosure so the page opens with status, not a wall of copy. Aims for ~140px tall. */
+ *  behind a disclosure so the page opens with status, not a wall of copy. Aims for ~140px tall.
+ *  `isPublished` comes pre-computed from `src/lib/data/books.ts` — this component never calls
+ *  `Date.now()`/`new Date()` itself (react-hooks/purity). */
 export function BookHeader({
   book,
 }: {
-  book: Pick<BookDetail, "title" | "package" | "publicationDate" | "teaser" | "stageLabel" | "coverHref">;
+  book: Pick<BookDetail, "title" | "package" | "publicationDate" | "isPublished" | "teaser" | "stageLabel" | "coverHref">;
 }) {
   return (
     <header className="flex max-w-[72ch] gap-5">
@@ -24,7 +26,7 @@ export function BookHeader({
         <h1 className="mt-1 text-3xl font-extrabold text-ink sm:text-4xl">{book.title}</h1>
         {book.publicationDate && (
           <p className="mt-2 text-ink-2">
-            {new Date(book.publicationDate).getTime() <= Date.now() ? "Published" : "Publishing"} {formatDate(book.publicationDate)}
+            {book.isPublished ? "Published" : "Publishing"} {formatDate(book.publicationDate)}
           </p>
         )}
         {book.teaser && (

@@ -15,20 +15,25 @@ function hostnameOf(url: string | null): string | null {
  * Shown on the book page, after Milestones, only when the author has a website in progress.
  * Second-person, on-brand: coral only calls out an expiring/expired domain (CLAUDE.md: coral is
  * reserved for "action needed"), everything else uses the teal/ink tokens.
+ *
+ * `domainStatus`/`domainExpiryDays` come pre-computed from `src/lib/data/books.ts` — this component
+ * never calls `Date.now()`/`new Date()` itself (react-hooks/purity).
  */
 export function WebsiteCard({ website }: { website: WebsiteView }) {
   const domain = hostnameOf(website.url);
-  const expiry = website.domainExpiry ? new Date(website.domainExpiry) : null;
-  const isSoonOrPast = expiry ? expiry.getTime() - Date.now() <= 30 * 24 * 60 * 60 * 1000 : false;
+  const isPast = website.domainStatus === "past";
+  const isSoonOrPast = website.domainStatus === "soon" || isPast;
 
   return (
     <section id="website" className="mt-12 max-w-[72ch]">
       <h2 className="eyebrow">Your author website</h2>
       <p className="mt-2 text-lg font-bold text-ink">{website.status ?? "In progress"}</p>
       {domain && <p className="mt-1 text-ink-2">{domain}</p>}
-      {expiry && (
+      {website.domainExpiry && (
         <p className={cn("mt-1 text-sm", isSoonOrPast ? "font-semibold text-coral-ink" : "text-muted")}>
-          {expiry.getTime() <= Date.now() ? "Domain renewed" : "Domain renews"} {formatDate(expiry.toISOString())}
+          {isPast
+            ? `Domain expiration date passed on ${formatDate(website.domainExpiry)} — check with your main contact that it was renewed`
+            : `Domain renews ${formatDate(website.domainExpiry)}`}
         </p>
       )}
       <div className="mt-4 flex flex-wrap gap-2">

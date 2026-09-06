@@ -19,6 +19,16 @@ export const runtime = "nodejs";
 const CHAT_MESSAGES_MAX_PER_DAY = 40;
 /** Brief: "history (last 10 turns)". Interpreted as the 10 most recent messages (user+assistant combined). */
 const HISTORY_TURNS = 10;
+/**
+ * Long-running conversations used to error outright once `useChat` sent more than 50 UI messages
+ * (the whole conversation is resent on every turn) — a chatty author asking a 26th question would
+ * fail validation entirely. `AssistantPanel` now trims to this many messages before sending, but
+ * the route enforces it too: the cap below is generous (well above what any legitimate client
+ * request should carry) purely so a request that somehow arrives untrimmed still gets a normal 400
+ * instead of never being accepted, and we slice down to the same limit before building the prompt.
+ */
+const MAX_UI_MESSAGES = 400;
+const RECENT_UI_MESSAGES = 20;
 
 // Loose validation for the AI SDK v5+ UIMessage shape sent by `useChat`'s DefaultChatTransport
 // (`{ id, messages, trigger, messageId, ...extraBody }`). We don't attempt to fully validate
@@ -36,7 +46,7 @@ const bodySchema = z.object({
   bookId: z.string().uuid().optional(),
   trigger: z.string().optional(),
   messageId: z.string().nullable().optional(),
-  messages: z.array(uiMessageSchema).min(1).max(50),
+  messages: z.array(uiMessageSchema).min(1).max(MAX_UI_MESSAGES),
 });
 
 function modelMessageText(message: ModelMessage): string {
@@ -53,7 +63,10 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "That request wasn't formatted the way we expected." }, { status: 400 });
   }
-  const { bookId, messages: uiMessages } = parsed.data;
+  const { bookId } = parsed.data;
+  // Defense in depth: AssistantPanel already trims to the last 20 messages before sending, but the
+  // route re-slices here too in case a request ever arrives untrimmed (see MAX_UI_MESSAGES above).
+  const uiMessages = parsed.data.messages.slice(-RECENT_UI_MESSAGES);
 
   const startOfDayUtc = new Date();
   startOfDayUtc.setUTCHours(0, 0, 0, 0);

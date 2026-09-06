@@ -19,6 +19,13 @@ export type PlannedUser = {
   email: string; // lowercased — the HubSpot join key
   hubspotContactId: string;
   name: string | null;
+  /** Canonical author profile, mirrored from the HubSpot Contact (see review finding #1). */
+  phone: string | null;
+  street: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  country: string | null;
 };
 
 export type PlannedBook = {
@@ -104,7 +111,17 @@ export function planSync(
     const email = contact.email.trim().toLowerCase();
     if (!usersByEmail.has(email)) {
       const name = [contact.firstname, contact.lastname].filter(Boolean).join(" ").trim() || null;
-      usersByEmail.set(email, { email, hubspotContactId: contact.id, name });
+      usersByEmail.set(email, {
+        email,
+        hubspotContactId: contact.id,
+        name,
+        phone: contact.phone,
+        street: contact.street,
+        city: contact.city,
+        region: contact.region,
+        postalCode: contact.postalCode,
+        country: contact.country,
+      });
     }
 
     const title = project.properties[titleProperty]?.trim() || "Untitled";
@@ -123,19 +140,21 @@ export function planSync(
   };
 }
 
+type PageConfig = {
+  stages: Pick<StageConfig, "key" | "hubspotValues">[];
+  propertyMap: PropertyMap;
+  titleProperty: string;
+  owners?: Map<string, { name: string; email: string | null }>;
+  extraProperties?: string[];
+};
+
 /** Fetch one page of Projects + their Contacts and plan it. No DB access — testable with a fake HubSpotReader. */
 export async function fetchAndPlanPage(
   reader: HubSpotReader,
   since: Date | null,
   after: string | undefined,
-  config: {
-    stages: Pick<StageConfig, "key" | "hubspotValues">[];
-    propertyMap: PropertyMap;
-    titleProperty: string;
-    owners?: Map<string, { name: string; email: string | null }>;
-    extraProperties?: string[];
-  },
-): Promise<{ plan: SyncPlan; nextAfter?: string }> {
+  config: PageConfig,
+): Promise<{ plan: SyncPlan; nextAfter?: string; total?: number }> {
   const page = await reader.searchProjectsModifiedSince(since, after);
   const contactIds = [...new Set(page.results.flatMap((p) => p.contactIds))];
   const contacts = await reader.getContactsByIds(contactIds);
@@ -144,5 +163,27 @@ export async function fetchAndPlanPage(
     owners: config.owners,
     extraProperties: config.extraProperties,
   });
-  return { plan, nextAfter: page.nextAfter };
+  return { plan, nextAfter: page.nextAfter, total: page.total };
+}
+
+/**
+ * Keyset-paginated equivalent of `fetchAndPlanPage`, immune to HubSpot's 10,000-result search
+ * ceiling (see `HubSpotReader.searchProjectsAfterId`). Used by full sync throughout, and by
+ * incremental sync as a fallback once a since-based query's `total` approaches the ceiling.
+ */
+export async function fetchAndPlanKeysetPage(
+  reader: HubSpotReader,
+  lastObjectId: string | null,
+  since: Date | null,
+  config: PageConfig,
+): Promise<{ plan: SyncPlan; lastObjectId: string | null }> {
+  const page = await reader.searchProjectsAfterId(lastObjectId, since);
+  const contactIds = [...new Set(page.results.flatMap((p) => p.contactIds))];
+  const contacts = await reader.getContactsByIds(contactIds);
+  const plan = planSync(page.results, contacts, config.stages, config.propertyMap, {
+    titleProperty: config.titleProperty,
+    owners: config.owners,
+    extraProperties: config.extraProperties,
+  });
+  return { plan, lastObjectId: page.lastObjectId };
 }

@@ -6,13 +6,18 @@ import { db } from "@/db";
 import { users, passwordResetTokens } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
-import { sendPasswordResetEmail } from "./email";
-import { PASSWORD_MIN_LENGTH, hashPassword, verifyPasswordHash, generateResetToken, hashResetToken } from "./password-core";
+import { sendPasswordChangedEmail, sendPasswordResetEmail } from "./email";
+import { revokeOtherSessions } from "./db-session";
+import { PASSWORD_MIN_LENGTH, PASSWORD_RULES_TEXT, hashPassword, verifyPasswordHash, generateResetToken, hashResetToken } from "./password-core";
 import type { Role } from "@/lib/types";
 
-export { PASSWORD_MIN_LENGTH, hashPassword, verifyPasswordHash, generateResetToken, hashResetToken };
+export { PASSWORD_MIN_LENGTH, PASSWORD_RULES_TEXT, hashPassword, verifyPasswordHash, generateResetToken, hashResetToken };
 
 const RESET_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+/** How recently a magic-link-only user must have signed in to set a first password without
+ *  re-verifying one (there's no password to re-verify). See `setPassword`. */
+const REAUTH_WINDOW_MS = 30 * 60 * 1000;
 
 async function resolveAppUrl(): Promise<string> {
   if (env.AUTH_URL) return env.AUTH_URL.replace(/\/$/, "");
@@ -75,7 +80,13 @@ async function isPwnedPassword(password: string): Promise<boolean> {
   }
 }
 
-/** Consumes a `/reset-password?token=` link: validates, hashes, updates the user, deletes the token, audits. */
+/**
+ * Consumes a `/reset-password?token=` link: validates, hashes, updates the user, then — since a
+ * reset means "prove you own the account by email, because you couldn't sign in" — revokes every
+ * outstanding reset token and every existing session for that user (there's no "current session"
+ * to preserve here; the reset-password page sends the user to `/sign-in` to get a fresh one) and
+ * emails a "your password was changed" notice.
+ */
 export async function resetPassword(token: string, newPassword: string): Promise<PasswordResult> {
   const tokenHash = hashResetToken(token);
   const [row] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, tokenHash)).limit(1);
@@ -88,41 +99,72 @@ export async function resetPassword(token: string, newPassword: string): Promise
   const strength = await checkPasswordStrength(newPassword);
   if (!strength.ok) return strength;
 
+  const [user] = await db.select().from(users).where(eq(users.id, row.userId)).limit(1);
+  if (!user) return { ok: false, error: "Account not found." };
+
   const passwordHash = await hashPassword(newPassword);
   await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, row.userId));
-  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, tokenHash));
+  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, row.userId));
+  await revokeOtherSessions(row.userId, null);
   await audit(row.userId, "auth.password_reset", { targetType: "user", targetId: row.userId });
+  await sendPasswordChangedEmail(user.email, await resolveAppUrl().then((b) => `${b}/sign-in`)).catch(() => {});
   return { ok: true };
 }
 
+export type SetPasswordErrorCode = "wrong_current" | "reauth" | "weak" | "error";
+export type SetPasswordResult = { ok: true } | { ok: false; code: SetPasswordErrorCode; error: string };
+
+/** True if this user already has a password set (vs. magic-link only). For the Account page to
+ *  decide whether to render/require the "Current password" field. */
+export async function hasPasswordHash(userId: string): Promise<boolean> {
+  const [user] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, userId)).limit(1);
+  return !!user?.passwordHash;
+}
+
 /**
- * Set/change password from the Account page. The caller (the account page's
- * own server action) is responsible for establishing `userId` via a verified
- * session — this function trusts the id it's given and does not re-derive it,
- * to avoid a circular import back through `@/auth`. Pass `currentPassword` to
- * require it match before changing (the "change password" case); omit it to
- * set a password for the first time (e.g. a magic-link-only account).
+ * Set/change password from the Account page. The caller (the account page's own server action)
+ * is responsible for establishing `userId` via a verified session — this function trusts the id
+ * it's given and does not re-derive it, to avoid a circular import back through `@/auth`.
+ *
+ * - If the account already has a password, `opts.currentPassword` is REQUIRED and must verify
+ *   (`wrong_current` otherwise) — there is no other proof of identity for a password change.
+ * - If the account is magic-link-only (no password yet), there's no current password to check,
+ *   so instead the caller's session must have been established recently — `users.lastLoginAt`
+ *   within `REAUTH_WINDOW_MS` — else `reauth`, asking them to sign in again first. (The `sessions`
+ *   table only stores `expires`, not `createdAt`, so `lastLoginAt` is the best proxy we have.)
+ *
+ * On success: revokes every OTHER session for the user (pass `opts.currentSessionToken` to keep
+ * the caller's own session alive), deletes all outstanding password-reset tokens, and emails a
+ * "your password was changed" notice.
  */
 export async function setPassword(
   userId: string,
   newPassword: string,
-  opts: { currentPassword?: string } = {},
-): Promise<PasswordResult> {
+  opts: { currentPassword?: string; currentSessionToken?: string | null } = {},
+): Promise<SetPasswordResult> {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) return { ok: false, error: "Account not found." };
+  if (!user) return { ok: false, code: "error", error: "Account not found." };
 
-  if (opts.currentPassword !== undefined) {
-    if (!user.passwordHash || !(await verifyPasswordHash(user.passwordHash, opts.currentPassword))) {
-      return { ok: false, error: "Current password is incorrect." };
+  if (user.passwordHash) {
+    if (!opts.currentPassword || !(await verifyPasswordHash(user.passwordHash, opts.currentPassword))) {
+      return { ok: false, code: "wrong_current", error: "Current password is incorrect." };
+    }
+  } else {
+    const recent = !!user.lastLoginAt && Date.now() - user.lastLoginAt.getTime() <= REAUTH_WINDOW_MS;
+    if (!recent) {
+      return { ok: false, code: "reauth", error: "For your security, please sign in again before setting a password." };
     }
   }
 
   const strength = await checkPasswordStrength(newPassword);
-  if (!strength.ok) return strength;
+  if (!strength.ok) return { ok: false, code: "weak", error: strength.error };
 
   const passwordHash = await hashPassword(newPassword);
   await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
+  await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
+  await revokeOtherSessions(userId, opts.currentSessionToken ?? null);
   await audit(userId, "auth.password_set", { targetType: "user", targetId: userId });
+  await sendPasswordChangedEmail(user.email, await resolveAppUrl().then((b) => `${b}/sign-in`)).catch(() => {});
   return { ok: true };
 }
 

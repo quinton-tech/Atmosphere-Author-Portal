@@ -17,6 +17,12 @@ export type AssistantPanelProps = {
 
 type AssistantUIMessage = UIMessage<unknown, AssistantDataParts>;
 
+/** `useChat` resends the whole conversation on every turn; without a cap a long-running chat (the
+ *  reported failure was a 26th question) would eventually exceed the route's message-count limit.
+ *  Kept in sync with `RECENT_UI_MESSAGES` in `src/app/api/chat/route.ts`, which re-applies the same
+ *  slice server-side as defense in depth. */
+const HISTORY_LIMIT = 20;
+
 function messageText(message: AssistantUIMessage): string {
   return message.parts
     .filter((p): p is Extract<AssistantUIMessage["parts"][number], { type: "text" }> => p.type === "text")
@@ -27,6 +33,26 @@ function messageText(message: AssistantUIMessage): string {
 function messageCitations(message: AssistantUIMessage): CitationsDataPart | null {
   const part = message.parts.find((p) => p.type === "data-citations");
   return part && part.type === "data-citations" ? part.data : null;
+}
+
+/**
+ * The route always responds with `{ error: string }` on a 4xx (rate limit, bad request, assistant
+ * not configured, …); `HttpChatTransport` throws `new Error(await response.text())` on any non-ok
+ * response, so `error.message` is that raw JSON text. Surface the server's actual copy instead of
+ * a generic fallback whenever it parses; only truly unexpected failures (network errors, a non-JSON
+ * body) fall back to a generic message.
+ */
+function errorMessage(error: Error | undefined): string | null {
+  if (!error) return null;
+  try {
+    const body: unknown = JSON.parse(error.message);
+    if (body && typeof body === "object" && typeof (body as { error?: unknown }).error === "string") {
+      return (body as { error: string }).error;
+    }
+  } catch {
+    // Not JSON — fall through to the generic message below.
+  }
+  return "Something went wrong. Please try again.";
 }
 
 function ThumbIcon({ down = false }: { down?: boolean }) {
@@ -41,8 +67,20 @@ export function AssistantPanel({ bookId, suggestedQuestions = [], className }: A
   const [input, setInput] = useState("");
   const [rated, setRated] = useState<Record<string, 1 | -1>>({});
 
-  const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat", body: { bookId } }), [bookId]);
-  const { messages, sendMessage, status, error } = useChat<AssistantUIMessage>({ transport });
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+        body: { bookId },
+        // Trim client-side before the request is even built, so a long-running conversation never
+        // grows the payload past what the route needs (it re-slices to the same 20 server-side).
+        prepareSendMessagesRequest: ({ id, messages: allMessages, trigger, messageId, body }) => ({
+          body: { ...body, id, trigger, messageId, messages: allMessages.slice(-HISTORY_LIMIT) },
+        }),
+      }),
+    [bookId],
+  );
+  const { messages, sendMessage, status, error, setMessages, clearError } = useChat<AssistantUIMessage>({ transport });
 
   const busy = status === "submitted" || status === "streaming";
 
@@ -50,6 +88,13 @@ export function AssistantPanel({ bookId, suggestedQuestions = [], className }: A
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     sendMessage({ text: trimmed });
+    setInput("");
+  }
+
+  function startNewConversation() {
+    setMessages([]);
+    clearError();
+    setRated({});
     setInput("");
   }
 
@@ -68,11 +113,24 @@ export function AssistantPanel({ bookId, suggestedQuestions = [], className }: A
 
   return (
     <aside className={cn("rounded-2xl border border-line bg-surface p-6", className)}>
-      <h2 className="eyebrow">Ask the Author Handbook</h2>
-      <p className="mt-2 max-w-[72ch] text-ink-2">
-        Answers are grounded in the Author Handbook. For anything specific to your book — dates, money, contract terms — ask your main
-        contact.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="eyebrow">Ask the Author Handbook</h2>
+          <p className="mt-2 max-w-[72ch] text-ink-2">
+            Answers are grounded in the Author Handbook. For anything specific to your book — dates, money, contract terms — ask your main
+            contact.
+          </p>
+        </div>
+        {messages.length > 0 && (
+          <button
+            type="button"
+            onClick={startNewConversation}
+            className="rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink-2 hover:text-ink"
+          >
+            Start a new conversation
+          </button>
+        )}
+      </div>
 
       {messages.length === 0 && suggestedQuestions.length > 0 && (
         <ul className="mt-4 flex flex-wrap gap-2">
@@ -169,13 +227,7 @@ export function AssistantPanel({ bookId, suggestedQuestions = [], className }: A
         </div>
       )}
 
-      {error && (
-        <p className="mt-4 text-sm text-bad">
-          {/today's limit/i.test(error.message)
-            ? "You've reached today's question limit. Try again tomorrow."
-            : "Something went wrong. Please try again."}
-        </p>
-      )}
+      {error && <p className="mt-4 text-sm text-bad">{errorMessage(error)}</p>}
 
       <form
         onSubmit={(e) => {

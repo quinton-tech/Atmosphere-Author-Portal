@@ -49,6 +49,7 @@ function Field({
   list,
   hint,
   className = "",
+  idPrefix = "",
 }: {
   name: string;
   label: string;
@@ -58,14 +59,19 @@ function Field({
   list?: string;
   hint?: string | null;
   className?: string;
+  /** MilestoneFields renders once per configured milestone plus once for "Add a milestone", so
+   *  the id must be unique per instance, or every milestone's fields collide and `<label htmlFor>`
+   *  only ever reaches the first one on the page. */
+  idPrefix?: string;
 }) {
+  const id = `${idPrefix}${name}`;
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
-      <label htmlFor={name} className="eyebrow">
+      <label htmlFor={id} className="eyebrow">
         {label}
       </label>
       <input
-        id={name}
+        id={id}
         name={name}
         type={type}
         list={list}
@@ -113,6 +119,7 @@ export function MilestoneFields({
   const ruleValue = Array.isArray(rule?.property?.value) ? rule!.property!.value.join(", ") : (rule?.property?.value ?? "");
   const packageOptions = optionsFor(schema, "package").length ? optionsFor(schema, "package") : FALLBACK_PACKAGES;
   const addOnOptions = optionsFor(schema, "service_add_ons").length ? optionsFor(schema, "service_add_ons") : FALLBACK_ADD_ONS;
+  const idPrefix = `${milestone?.id ?? "new"}-`;
 
   return (
     <div className="space-y-4 rounded-lg border border-line bg-surface p-4">
@@ -120,10 +127,10 @@ export function MilestoneFields({
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="flex flex-col gap-1">
-          <label htmlFor="stageKey" className="eyebrow">
+          <label htmlFor={`${idPrefix}stageKey`} className="eyebrow">
             Stage
           </label>
-          <select id="stageKey" name="stageKey" defaultValue={milestone?.stageKey ?? ""} className={inputCls}>
+          <select id={`${idPrefix}stageKey`} name="stageKey" defaultValue={milestone?.stageKey ?? ""} className={inputCls}>
             <option value="" disabled>
               Select a stage…
             </option>
@@ -134,19 +141,20 @@ export function MilestoneFields({
             ))}
           </select>
         </div>
-        <Field name="label" label="Label" placeholder="Cold read" defaultValue={milestone?.label} />
+        <Field name="label" label="Label" placeholder="Cold read" defaultValue={milestone?.label} idPrefix={idPrefix} />
         <Field
           name="propertyName"
           label="Property (internal name)"
           placeholder="cold_read_status"
           defaultValue={milestone?.propertyName}
           list={propertyListId}
+          idPrefix={idPrefix}
         />
         <div className="flex flex-col gap-1">
-          <label htmlFor="kind" className="eyebrow">
+          <label htmlFor={`${idPrefix}kind`} className="eyebrow">
             Kind
           </label>
-          <select id="kind" name="kind" defaultValue={milestone?.kind ?? "status"} className={inputCls}>
+          <select id={`${idPrefix}kind`} name="kind" defaultValue={milestone?.kind ?? "status"} className={inputCls}>
             <option value="status">status</option>
             <option value="date">date</option>
             <option value="flag">flag</option>
@@ -154,7 +162,13 @@ export function MilestoneFields({
         </div>
       </div>
 
-      <Field name="description" label="Description" placeholder="Optional detail shown to the author" defaultValue={milestone?.description} />
+      <Field
+        name="description"
+        label="Description"
+        placeholder="Optional detail shown to the author"
+        defaultValue={milestone?.description}
+        idPrefix={idPrefix}
+      />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field
@@ -163,29 +177,40 @@ export function MilestoneFields({
           placeholder="Completed, Completed - Pre-ID"
           defaultValue={milestone?.doneValues?.join(", ")}
           hint={optionsHint(schema, milestone?.propertyName)}
+          idPrefix={idPrefix}
         />
         <Field
           name="hiddenValues"
           label="Hidden values (comma list)"
           placeholder="NOT publishing"
           defaultValue={milestone?.hiddenValues?.join(", ")}
+          idPrefix={idPrefix}
         />
         <Field
           name="inProgressValues"
           label="In-progress values (optional, comma list)"
           placeholder="Leave blank: any other non-empty value"
           defaultValue={milestone?.inProgressValues?.join(", ") ?? ""}
+          idPrefix={idPrefix}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Field name="linkProperty" label="Link property" placeholder="kirkus_link" defaultValue={milestone?.linkProperty ?? ""} list={propertyListId} />
+        <Field
+          name="linkProperty"
+          label="Link property"
+          placeholder="kirkus_link"
+          defaultValue={milestone?.linkProperty ?? ""}
+          list={propertyListId}
+          idPrefix={idPrefix}
+        />
         <Field
           name="dateProperty"
           label="Date property"
           placeholder="netgalley_start_date"
           defaultValue={milestone?.dateProperty ?? ""}
           list={propertyListId}
+          idPrefix={idPrefix}
         />
         <Field
           name="venueProperty"
@@ -193,6 +218,7 @@ export function MilestoneFields({
           placeholder="premier_review_venue"
           defaultValue={milestone?.venueProperty ?? ""}
           list={propertyListId}
+          idPrefix={idPrefix}
         />
       </div>
 
@@ -204,6 +230,7 @@ export function MilestoneFields({
           defaultValue={milestone?.linkLabel ?? ""}
           hint="e.g. Read your {venue} review"
           className="sm:col-span-2"
+          idPrefix={idPrefix}
         />
       </div>
 
@@ -226,12 +253,13 @@ export function MilestoneFields({
             placeholder="cold_read_status"
             defaultValue={rule?.property?.name ?? ""}
             list={propertyListId}
+            idPrefix={idPrefix}
           />
           <div className="flex flex-col gap-1">
-            <label htmlFor="ruleOperator" className="eyebrow">
+            <label htmlFor={`${idPrefix}ruleOperator`} className="eyebrow">
               Operator
             </label>
-            <select id="ruleOperator" name="ruleOperator" defaultValue={rule?.property?.operator ?? ""} className={inputCls}>
+            <select id={`${idPrefix}ruleOperator`} name="ruleOperator" defaultValue={rule?.property?.operator ?? ""} className={inputCls}>
               <option value="">—</option>
               {RULE_OPERATORS.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -240,12 +268,12 @@ export function MilestoneFields({
               ))}
             </select>
           </div>
-          <Field name="ruleValue" label="Value(s)" placeholder="value or a, b, c" defaultValue={ruleValue} />
+          <Field name="ruleValue" label="Value(s)" placeholder="value or a, b, c" defaultValue={ruleValue} idPrefix={idPrefix} />
         </div>
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
-        <Field name="sortOrder" label="Sort order" type="number" defaultValue={milestone?.sortOrder ?? 0} className="w-28" />
+        <Field name="sortOrder" label="Sort order" type="number" defaultValue={milestone?.sortOrder ?? 0} className="w-28" idPrefix={idPrefix} />
         <label className="flex items-center gap-2 pb-1.5 text-sm text-ink-2">
           <input type="checkbox" name="enabled" defaultChecked={milestone?.enabled ?? true} /> Enabled
         </label>

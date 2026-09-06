@@ -76,7 +76,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         if (!email || !password) return null;
 
         const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
-        if (isLoginRateLimited(email, ip)) return null;
+        if (await isLoginRateLimited(email, ip)) return null;
 
         const user = await verifyPasswordLogin(email, password);
         if (!user) return null;

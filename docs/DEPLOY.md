@@ -149,17 +149,22 @@ Every additional admin you create must enroll TOTP the same way on their first `
    npm run sync:hubspot -- --kind=full
    ```
 
-## 10. Author uploads (optional)
+## 11. Author uploads (optional)
 
-Lets authors send files (manuscripts, signed forms) to their team from `/uploads`. This is the one approved exception to "Drive is read-only" (see CLAUDE.md) — it writes through a SECOND, separate service account, distinct from the read-only one in §4, so a compromised or misconfigured uploads credential can never touch the read-only Drive tree the rest of the app serves from.
+Lets authors send files (manuscripts, signed forms) to their team from `/uploads`, and lets admins upload the Author Handbook from `/admin/handbook`. This is the one approved exception to "Drive is read-only" (see CLAUDE.md) — it writes through a SECOND, separate service account, distinct from the read-only one in §4, so a compromised or misconfigured uploads credential can never touch the read-only Drive tree the rest of the app serves from.
+
+**Bytes never pass through this app's server.** Both flows use a direct-to-Drive *resumable upload*: the browser calls a small route handler (`POST /api/uploads/session` for authors, `POST /api/admin/handbook/session` for the handbook) that validates everything up front and asks Drive to open a resumable session, then the browser PUTs the file straight to the returned Google session URI (`src/lib/uploads/resumable-client.ts`), and finally calls a `.../complete` route so the server can confirm with Drive what landed and record it. This is deliberate: Vercel caps every function's request body at 4.5MB regardless of any Next.js config (https://vercel.com/docs/functions/limitations#request-body-size), which is well under the 50MB/25MB this app advertises — routing the bytes through our own server would silently break any upload past 4.5MB. See `src/lib/drive/uploads.ts` for the Drive-side half of the protocol.
+
+**If you add a Content-Security-Policy later** (there is none today — see `src/proxy.ts` and `next.config.ts`), its `connect-src` must allow `https://www.googleapis.com`, since the upload PUT and status-check requests go out directly from the author's/admin's browser to Google, not through this app's origin.
 
 1. In Google Cloud Console, create a second Service Account (or reuse the project from §4, but a distinct account) and a JSON key for it, same as §4 steps 1-3.
 2. Base64-encode it and set `GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64` — note this is a **different** env var from `GOOGLE_SERVICE_ACCOUNT_JSON_B64`; do not reuse the same key for both.
-3. Create (or choose) an empty Drive folder to be the uploads root, and share it with this service account's `client_email` as **Editor** (not Viewer — it needs to create subfolders and files). Set its id as `GOOGLE_UPLOADS_ROOT_FOLDER_ID`.
-4. `src/lib/drive/uploads.ts` requests only the `drive.file` scope, so even with Editor access on the shared folder, this credential can only see files/folders it created itself — it can never list or read anything else in Drive, including the folder tree from §4. `src/lib/drive/uploads.guard.test.ts` fails the build if any other file tries to call a Drive write method.
+3. Create (or choose) an empty Drive folder to be the uploads root, and share it with this service account's `client_email` as **Editor** (not Viewer — it needs to create subfolders and files). Set its id as `GOOGLE_UPLOADS_ROOT_FOLDER_ID`. The handbook flow creates its own "Handbook" subfolder under this same root.
+4. `src/lib/drive/uploads.ts` requests only the `drive.file` scope, so even with Editor access on the shared folder, this credential can only see files/folders it created itself — it can never list or read anything else in Drive, including the folder tree from §4. `src/lib/drive/uploads.guard.test.ts` fails the build if any other file tries to call a Drive write method (including a raw `fetch()` to Drive's upload endpoint).
 5. Set `UPLOADS_NOTIFY_EMAIL` to the staff inbox that should get an email (via Resend, so `RESEND_API_KEY` from §5 must also be set) every time an author sends a file.
-6. All three vars are optional — if unset, `/uploads` shows a friendly "not set up yet" message instead of erroring. In demo mode (`DEMO_MODE=1`), uploads work end-to-end without any of this configured: the file is recorded with `status: "demo"` and Drive is never called.
+6. All three vars are optional — if unset: `/uploads` shows a friendly "not set up yet" message instead of erroring, and `/admin/handbook` falls back to a plain `<form>` upload capped at 4MB (Vercel's hard function limit) with a notice pointing back here. In demo mode (`DEMO_MODE=1`), author uploads work end-to-end without any of this configured: the file is recorded with `status: "demo"` and Drive is never called — no bytes are sent anywhere, not even to this app's own server.
 7. Staff review incoming files at `/admin/uploads`.
+8. A session an author or admin starts but never finishes (browser closed mid-upload, network drop with no successful retry) stays `status: "pending"` for up to 24h; the nightly `/api/cron/sync` run (see §10) marks anything older than that `"failed"` so it doesn't linger forever.
 
 ## Launch checklist
 
@@ -177,4 +182,4 @@ Lets authors send files (manuscripts, signed forms) to their team from `/uploads
 - [ ] Handbook uploaded and made active at `/admin/handbook`
 - [ ] Assistant provider/model chosen at `/admin/assistant`
 - [ ] A real author invited end-to-end (magic link arrives, dashboard shows their book) before wider rollout
-- [ ] (Optional) Author uploads: second service account created, uploads root folder shared with it as Editor, `GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64` / `GOOGLE_UPLOADS_ROOT_FOLDER_ID` / `UPLOADS_NOTIFY_EMAIL` set — see §10
+- [ ] (Optional) Author uploads: second service account created, uploads root folder shared with it as Editor, `GOOGLE_UPLOADS_SERVICE_ACCOUNT_JSON_B64` / `GOOGLE_UPLOADS_ROOT_FOLDER_ID` / `UPLOADS_NOTIFY_EMAIL` set — see §11

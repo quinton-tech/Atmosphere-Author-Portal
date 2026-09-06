@@ -4,11 +4,12 @@ import { getAssistantSettings, listChatMessages } from "./queries";
 import { saveAssistantSettingsAction } from "./actions";
 import { PageHeader, Badge, Card, FormError, FormSuccess, Pagination, PillButton, Table, Th, Td } from "../_components/ui";
 import { fmtDateTime } from "../_lib/format";
+import { hasPrevPage, trailPop, trailPush } from "../_lib/cursor";
 
 export default async function AssistantPage({
   searchParams,
 }: {
-  searchParams: Promise<{ rating?: "-1" | "1"; notInHandbook?: string; cursor?: string; ok?: string; error?: string }>;
+  searchParams: Promise<{ rating?: "-1" | "1"; notInHandbook?: string; cursor?: string; trail?: string; ok?: string; error?: string }>;
 }) {
   const sp = await searchParams;
   const [models, settings, log] = await Promise.all([
@@ -22,7 +23,19 @@ export default async function AssistantPage({
   if (sp.rating) params.set("rating", sp.rating);
   if (sp.notInHandbook) params.set("notInHandbook", sp.notInHandbook);
   params.set("cursor", log.nextCursor ?? "");
+  params.set("trail", trailPush(sp.trail, sp.cursor));
   const nextHref = `/admin/assistant?${params.toString()}`;
+
+  let prevHref: string | null = null;
+  if (hasPrevPage(sp.trail)) {
+    const { cursor: prevCursor, trail: remainingTrail } = trailPop(sp.trail);
+    const prevParams = new URLSearchParams();
+    if (sp.rating) prevParams.set("rating", sp.rating);
+    if (sp.notInHandbook) prevParams.set("notInHandbook", sp.notInHandbook);
+    if (prevCursor) prevParams.set("cursor", prevCursor);
+    if (remainingTrail) prevParams.set("trail", remainingTrail);
+    prevHref = `/admin/assistant?${prevParams.toString()}`;
+  }
 
   return (
     <div>
@@ -92,11 +105,21 @@ export default async function AssistantPage({
           </thead>
           <tbody>
             {log.rows.map((m) => (
-              <tr key={m.id}>
-                <Td>{fmtDateTime(m.createdAt)}</Td>
-                <Td>{m.userEmail}</Td>
+              <tr key={m.id} className="cursor-pointer hover:bg-surface">
+                <Td className="whitespace-nowrap">
+                  <Link href={`/admin/assistant/${m.id}`} className="block text-ink hover:underline">
+                    {fmtDateTime(m.createdAt)}
+                  </Link>
+                </Td>
+                <Td>
+                  <Link href={`/admin/assistant/${m.id}`} className="block hover:underline">
+                    {m.userEmail}
+                  </Link>
+                </Td>
                 <Td className="max-w-md truncate" title={m.question}>
-                  {m.question}
+                  <Link href={`/admin/assistant/${m.id}`} className="block hover:underline">
+                    {m.question}
+                  </Link>
                 </Td>
                 <Td>
                   {m.provider ?? "—"} {m.model ? `/ ${m.model}` : ""}
@@ -114,7 +137,7 @@ export default async function AssistantPage({
             ) : null}
           </tbody>
         </Table>
-        <Pagination hasMore={!!log.nextCursor} nextHref={nextHref} />
+        <Pagination hasMore={!!log.nextCursor} nextHref={nextHref} prevHref={prevHref} />
       </section>
     </div>
   );

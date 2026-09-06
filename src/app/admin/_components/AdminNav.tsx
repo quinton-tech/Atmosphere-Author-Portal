@@ -30,10 +30,12 @@ export function AdminNav() {
           <Link
             key={l.href}
             href={l.href}
-            className={`eyebrow rounded-md px-3 py-2 tracking-normal normal-case text-[13px] font-semibold transition-colors ${
-              active ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white"
+            aria-current={active ? "page" : undefined}
+            className={`eyebrow flex items-center gap-2 rounded-md px-3 py-2 tracking-normal normal-case text-[13px] font-semibold text-white transition-colors ${
+              active ? "bg-white/15" : "hover:bg-white/10"
             }`}
           >
+            <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-coral" : "bg-transparent"}`} />
             {l.label}
           </Link>
         );

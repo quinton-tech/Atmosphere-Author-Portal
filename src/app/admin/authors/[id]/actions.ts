@@ -6,8 +6,9 @@ import { db } from "@/db";
 import { appSettings, notes } from "@/db/schema";
 import { requireAdmin } from "@/lib/session";
 import { audit } from "@/lib/audit";
+import { adminRevokeAccess } from "@/lib/auth/invite";
 import { redirectWithFlash, runAction } from "../../_lib/flash";
-import { linkFolder, setFileVisibility, syncAuthor } from "../../_integrations";
+import { linkFolder, resendInvite, setFileVisibility, syncAuthor } from "../../_integrations";
 import { getBookRowForAuthor } from "./queries";
 
 const uuid = z.string().uuid();
@@ -62,6 +63,38 @@ export async function refreshFromHubspotAction(userId: string): Promise<void> {
       await audit(admin.id, "admin.sync.trigger", { targetType: "user", targetId: uid, meta: { source: "author_refresh" } });
     },
     "Refreshed from HubSpot.",
+  );
+}
+
+/** Same action as the one on the authors list — duplicated here (rather than imported from
+ *  `../actions`, which is off-limits to this agent) so staff can resend an invite without leaving
+ *  an author's own detail page. */
+export async function resendInviteAction(userId: string): Promise<void> {
+  const admin = await requireAdmin();
+  const uid = uuid.parse(userId);
+  await runAction(
+    detailPath(uid),
+    async () => {
+      await resendInvite(uid);
+      await audit(admin.id, "admin.resend_invite", { targetType: "user", targetId: uid });
+    },
+    "Invite resent.",
+  );
+}
+
+export async function revokeAccessAction(userId: string): Promise<void> {
+  const admin = await requireAdmin();
+  const uid = uuid.parse(userId);
+  if (uid === admin.id) {
+    redirectWithFlash(detailPath(uid), "error", "You can't revoke your own access. Ask another admin to do it.");
+  }
+  await runAction(
+    detailPath(uid),
+    async () => {
+      await adminRevokeAccess(uid, admin.id);
+      await audit(admin.id, "admin.revoke_access", { targetType: "user", targetId: uid });
+    },
+    "Access revoked.",
   );
 }
 

@@ -8,7 +8,7 @@ import { requireAdmin } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import type { MilestoneView } from "@/lib/types";
 import { redirectWithFlash, runAction } from "../_lib/flash";
-import { previewMilestonesForEmail } from "./queries";
+import { previewMilestonesForBook, type MilestonePreviewDetail, type PreviewBookOption } from "./queries";
 
 const LIST_PATH = "/admin/milestones";
 
@@ -142,13 +142,29 @@ export async function deleteMilestoneAction(id: string): Promise<void> {
   );
 }
 
-export type PreviewState = { email?: string; bookTitle?: string; milestones?: MilestoneView[]; error?: string };
+export type PreviewState = {
+  email?: string;
+  bookId?: string;
+  bookTitle?: string;
+  books?: PreviewBookOption[];
+  milestones?: MilestoneView[];
+  details?: MilestonePreviewDetail[];
+  error?: string;
+};
 
 export async function previewMilestoneAction(_prev: PreviewState, formData: FormData): Promise<PreviewState> {
   await requireAdmin();
   const email = String(formData.get("email") ?? "").trim();
   if (!email) return { error: "Enter an author email." };
-  const result = await previewMilestonesForEmail(email);
+  const bookId = String(formData.get("bookId") ?? "").trim() || undefined;
+  const result = await previewMilestonesForBook(email, bookId);
   if ("error" in result) return { email, error: result.error };
-  return { email, bookTitle: result.bookTitle, milestones: result.milestones };
+  return {
+    email,
+    bookId: result.bookId,
+    bookTitle: result.bookTitle,
+    books: result.books,
+    milestones: result.milestones,
+    details: result.details,
+  };
 }

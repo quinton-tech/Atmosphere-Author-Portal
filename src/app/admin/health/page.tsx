@@ -1,16 +1,18 @@
-import { getActiveHandbook, getHealthCounts, getPropertyUnresolved, listRecentSyncRuns } from "./queries";
+import { getActiveHandbook, getHealthCounts, getPropertyUnresolved, getSyncScheduleStatus, isDemoHandbook, listRecentSyncRuns } from "./queries";
 import { triggerSyncAction } from "./actions";
 import { PageHeader, Badge, Card, FormError, FormSuccess, PillButton, Table, Th, Td } from "../_components/ui";
 import { fmtDateTime } from "../_lib/format";
 
 export default async function HealthPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const sp = await searchParams;
-  const [runs, handbook, unresolved, counts] = await Promise.all([
+  const [runs, handbook, unresolved, counts, syncSchedule] = await Promise.all([
     listRecentSyncRuns(),
     getActiveHandbook(),
     getPropertyUnresolved(),
     getHealthCounts(),
+    getSyncScheduleStatus(),
   ]);
+  const demoHandbook = isDemoHandbook(handbook);
 
   return (
     <div>
@@ -34,6 +36,14 @@ export default async function HealthPage({ searchParams }: { searchParams: Promi
         <FormSuccess message={sp.ok} />
       </div>
 
+      {demoHandbook ? (
+        <div className="mb-8 rounded-lg border border-coral bg-coral/10 px-4 py-3">
+          <p className="text-sm font-semibold text-coral-ink">
+            The active handbook is the demo sample. Upload the real Author Handbook before inviting authors.
+          </p>
+        </div>
+      ) : null}
+
       <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-5">
         <Stat label="Authors" value={counts.users} />
         <Stat label="Books" value={counts.books} />
@@ -47,7 +57,9 @@ export default async function HealthPage({ searchParams }: { searchParams: Promi
           <p className="eyebrow mb-2">Active handbook</p>
           {handbook ? (
             <div className="text-sm text-ink-2">
-              <p className="font-semibold text-ink">{handbook.filename}</p>
+              <p className="font-semibold text-ink">
+                {handbook.filename} {demoHandbook ? <Badge tone="bad">Demo sample</Badge> : null}
+              </p>
               <p>
                 {handbook.sections.length} sections · {handbook.tokenEstimate.toLocaleString()} tokens (est.)
               </p>
@@ -72,6 +84,44 @@ export default async function HealthPage({ searchParams }: { searchParams: Promi
           </div>
         </Card>
       </div>
+
+      <section className="mb-8">
+        <p className="eyebrow mb-2">Sync schedule (approximate)</p>
+        <p className="mb-2 text-xs text-muted">
+          <code>sync_runs</code> doesn&apos;t record who triggered a run, so this is inferred from the audit log — a run that started
+          within 60 seconds of a &ldquo;Run sync&rdquo; click above is treated as manual.
+        </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Card>
+            <p className="eyebrow">Last automatic sync</p>
+            {syncSchedule.lastAutomatic ? (
+              <p className="text-sm text-ink">
+                {fmtDateTime(syncSchedule.lastAutomatic.startedAt)} — {syncSchedule.lastAutomatic.kind}{" "}
+                {syncSchedule.lastAutomatic.status === "ok" ? (
+                  <Badge tone="ok">ok</Badge>
+                ) : syncSchedule.lastAutomatic.status === "error" ? (
+                  <Badge tone="bad">error</Badge>
+                ) : (
+                  <Badge tone="warn">running</Badge>
+                )}
+              </p>
+            ) : (
+              <p className="text-sm text-muted">None seen yet.</p>
+            )}
+          </Card>
+          <Card>
+            <p className="eyebrow">Last manual refresh</p>
+            {syncSchedule.lastManual ? (
+              <p className="text-sm text-ink">
+                {fmtDateTime(syncSchedule.lastManual.triggeredAt)}
+                {syncSchedule.lastManual.run ? ` — ${syncSchedule.lastManual.run.kind}` : ""}
+              </p>
+            ) : (
+              <p className="text-sm text-muted">None seen yet.</p>
+            )}
+          </Card>
+        </div>
+      </section>
 
       {unresolved.length > 0 ? (
         <section className="mb-8">
@@ -109,7 +159,7 @@ export default async function HealthPage({ searchParams }: { searchParams: Promi
           <tbody>
             {runs.map((r) => (
               <tr key={r.id}>
-                <Td>{fmtDateTime(r.startedAt)}</Td>
+                <Td className="whitespace-nowrap">{fmtDateTime(r.startedAt)}</Td>
                 <Td>{r.kind}</Td>
                 <Td>
                   {r.status === "ok" ? <Badge tone="ok">ok</Badge> : r.status === "error" ? <Badge tone="bad">error</Badge> : <Badge tone="warn">running</Badge>}
@@ -118,7 +168,20 @@ export default async function HealthPage({ searchParams }: { searchParams: Promi
                 <Td className="tabular">{r.created}</Td>
                 <Td className="tabular">{r.updated}</Td>
                 <Td className="tabular">{r.unmatched}</Td>
-                <Td>{r.errors.length > 0 ? <Badge tone="bad">{r.errors.length}</Badge> : "—"}</Td>
+                <Td>
+                  {r.errors.length > 0 ? (
+                    <details>
+                      <summary className="cursor-pointer">
+                        <Badge tone="bad">{r.errors.length}</Badge>
+                      </summary>
+                      <pre className="mt-2 max-w-md overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-surface p-2 font-mono text-xs text-bad">
+                        {r.errors.join("\n")}
+                      </pre>
+                    </details>
+                  ) : (
+                    "—"
+                  )}
+                </Td>
               </tr>
             ))}
             {runs.length === 0 ? (

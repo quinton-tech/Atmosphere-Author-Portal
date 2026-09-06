@@ -1,94 +1,87 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { books, users } from "@/db/schema";
 import { authorUploads, type AuthorUpload } from "@/db/schema-uploads";
-import { audit, type AuditAction } from "@/lib/audit";
+import { audit } from "@/lib/audit";
 import { env, isDemoMode, isUploadsConfigured } from "@/lib/env";
 import { listBooksForUser } from "@/lib/data/books";
-import { ensureFolder, uploadFile } from "@/lib/drive/uploads";
+import { createResumableSession, ensureFolder, finalizeUploadedFile } from "@/lib/drive/uploads";
 import { sanitizeFilename } from "@/lib/drive/mime";
 import { sendUploadNotificationEmail } from "@/lib/auth/email";
+import {
+  DEMO_MAX_UPLOAD_BYTES,
+  isPendingExpired,
+  MAX_UPLOAD_BYTES,
+  UPLOAD_KINDS,
+  UPLOAD_MAX_PER_DAY,
+  UploadError,
+  validateUploadMeta,
+  type UploadKind,
+} from "./uploads-validation";
 
 /**
  * All write logic for the one approved Drive-write exception (see CLAUDE.md hard rules and
  * src/lib/drive/uploads.ts). Like src/lib/data/books.ts, every read here is scoped by the
  * signed-in user's id — there is deliberately no "get any upload by id" without a userId.
+ *
+ * Two-step, direct-to-Drive protocol (bytes never pass through this server):
+ *   1. createUploadSessionForUser — all validation up front, ensures the Drive folder tree,
+ *      opens a resumable session, inserts a "pending" row. The browser then PUTs the file
+ *      straight to Drive using the returned session URI.
+ *   2. completeUploadForUser — called after the browser's PUT finishes; confirms with Drive
+ *      what actually landed and flips the row to "stored" (or "demo").
+ * See src/app/api/uploads/session/route.ts and .../complete/route.ts.
  */
 
-/** User-safe error: message is shown directly to the author. */
-export class UploadError extends Error {}
-
-export const UPLOAD_KINDS = ["manuscript", "form", "other"] as const;
-export type UploadKind = (typeof UPLOAD_KINDS)[number];
-
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
-export const UPLOAD_MAX_PER_DAY = 20;
-
-const ALLOWED_EXTENSION_MIME: Record<string, string> = {
-  pdf: "application/pdf",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  doc: "application/msword",
-  rtf: "application/rtf",
-  txt: "text/plain",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  png: "image/png",
-  zip: "application/zip",
-};
-
-function extensionOf(fileName: string): string | null {
-  const match = /\.([a-z0-9]+)$/i.exec(fileName.trim());
-  return match ? match[1].toLowerCase() : null;
-}
+export { UploadError, UPLOAD_KINDS, UPLOAD_MAX_PER_DAY, type UploadKind };
 
 /**
- * Checks the file's first bytes against its claimed extension for the types where a signature
- * exists and is cheap to check. docx and zip share the same "PK" signature (docx is a zip
- * container) — that's expected, not a bug. doc/rtf/txt have no single reliable magic number
- * worth enforcing here, so they pass through on extension/size checks alone.
+ * The `status` column (src/db/schema-uploads.ts) is typed `"stored" | "demo" | "failed"` only —
+ * that file is off-limits to this change (see the task's scoping notes), and a fourth status is
+ * genuinely needed for "the browser hasn't finished PUTting bytes to Drive yet". The column
+ * itself is plain Postgres `text` with no CHECK constraint, so "pending" round-trips at runtime
+ * exactly like the three known values; this cast only satisfies the narrower compile-time type
+ * without touching the schema file. Every use of PENDING below is one of the "existing columns,
+ * used differently" the task calls for — no new column, no schema change.
  */
-function matchesMagicBytes(extension: string, bytes: Uint8Array): boolean {
-  const b = (i: number) => bytes[i] ?? -1;
-  switch (extension) {
-    case "pdf":
-      return b(0) === 0x25 && b(1) === 0x50 && b(2) === 0x44 && b(3) === 0x46; // %PDF
-    case "png":
-      return b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47; // .PNG
-    case "jpg":
-    case "jpeg":
-      return b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff; // JPEG SOI + marker
-    case "zip":
-    case "docx":
-      return b(0) === 0x50 && b(1) === 0x4b; // "PK"
-    default:
-      return true;
-  }
+const PENDING = "pending" as unknown as AuthorUpload["status"];
+
+async function countUploadsToday(userId: string): Promise<number> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({ id: authorUploads.id })
+    .from(authorUploads)
+    .where(and(eq(authorUploads.userId, userId), gte(authorUploads.createdAt, since)))
+    .limit(UPLOAD_MAX_PER_DAY);
+  return rows.length;
 }
 
-/** Validates a File before it ever touches Drive or the database. Throws UploadError with
- *  author-facing copy on any rejection. Returns the canonical mime type to store. */
-async function validateFile(file: File): Promise<{ mimeType: string; bytes: Buffer }> {
-  const extension = extensionOf(file.name);
-  if (!extension || !(extension in ALLOWED_EXTENSION_MIME)) {
-    throw new UploadError(
-      `We can't accept .${extension ?? "?"} files. Allowed types: ${Object.keys(ALLOWED_EXTENSION_MIME).join(", ")}.`,
-    );
-  }
-  if (file.size <= 0) {
-    throw new UploadError("That file looks empty. Please choose a different file.");
-  }
-  if (file.size > MAX_UPLOAD_BYTES) {
-    throw new UploadError("That file is larger than 50 MB. Please send a smaller file, or ask your Author Manager for another way to share it.");
-  }
+/** Marks this user's own stale "pending" rows "failed" — the "or on the next session creation for
+ *  that user" half of the 24h cleanup rule (the other half is the cron sweep below). Cheap: a
+ *  user has at most UPLOAD_MAX_PER_DAY rows/day, so this never scans more than a handful. */
+async function expirePendingUploadsForUser(userId: string): Promise<void> {
+  const rows = await db
+    .select({ id: authorUploads.id, createdAt: authorUploads.createdAt })
+    .from(authorUploads)
+    .where(and(eq(authorUploads.userId, userId), eq(authorUploads.status, PENDING)));
+  const staleIds = rows.filter((r) => isPendingExpired(r.createdAt)).map((r) => r.id);
+  if (staleIds.length === 0) return;
+  await db.update(authorUploads).set({ status: "failed" }).where(inArray(authorUploads.id, staleIds));
+}
 
-  const bytes = Buffer.from(await file.arrayBuffer());
-  if (!matchesMagicBytes(extension, bytes)) {
-    throw new UploadError("That file doesn't look like a valid " + extension.toUpperCase() + " file. Please check it and try again.");
-  }
-
-  return { mimeType: ALLOWED_EXTENSION_MIME[extension], bytes };
+/** Global sweep for the cron route (src/app/api/cron/sync/route.ts): any user's "pending" row
+ *  older than 24h — abandoned mid-upload, or the browser never called .../complete — is marked
+ *  "failed" so it stops showing as "Sending…" forever. Returns how many rows were expired. */
+export async function expireStalePendingUploads(): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const updated = await db
+    .update(authorUploads)
+    .set({ status: "failed" })
+    .where(and(eq(authorUploads.status, PENDING), lt(authorUploads.createdAt, cutoff)))
+    .returning({ id: authorUploads.id });
+  return updated.length;
 }
 
 export type UploadListItem = {
@@ -103,6 +96,20 @@ export type UploadListItem = {
   createdAt: string; // ISO
 };
 
+function toListItem(upload: AuthorUpload, bookTitle: string | null): UploadListItem {
+  return {
+    id: upload.id,
+    bookId: upload.bookId,
+    bookTitle,
+    kind: upload.kind,
+    fileName: upload.fileName,
+    sizeBytes: upload.sizeBytes,
+    note: upload.note,
+    status: upload.status,
+    createdAt: upload.createdAt.toISOString(),
+  };
+}
+
 /** Ownership-scoped: newest first, capped at 100 — this is a "your recent sends" list, not an archive browser. */
 export async function listUploadsForUser(userId: string): Promise<UploadListItem[]> {
   const rows = await db
@@ -113,17 +120,7 @@ export async function listUploadsForUser(userId: string): Promise<UploadListItem
     .orderBy(desc(authorUploads.createdAt))
     .limit(100);
 
-  return rows.map(({ upload, bookTitle }) => ({
-    id: upload.id,
-    bookId: upload.bookId,
-    bookTitle: bookTitle ?? null,
-    kind: upload.kind,
-    fileName: upload.fileName,
-    sizeBytes: upload.sizeBytes,
-    note: upload.note,
-    status: upload.status,
-    createdAt: upload.createdAt.toISOString(),
-  }));
+  return rows.map(({ upload, bookTitle }) => toListItem(upload, bookTitle ?? null));
 }
 
 /** Ownership-scoped to one book: the inner join only matches rows where `bookId` belongs to
@@ -138,96 +135,110 @@ export async function listUploadsForBook(userId: string, bookId: string): Promis
     .orderBy(desc(authorUploads.createdAt))
     .limit(100);
 
-  return rows.map(({ upload, bookTitle }) => ({
-    id: upload.id,
-    bookId: upload.bookId,
-    bookTitle: bookTitle ?? null,
-    kind: upload.kind,
-    fileName: upload.fileName,
-    sizeBytes: upload.sizeBytes,
-    note: upload.note,
-    status: upload.status,
-    createdAt: upload.createdAt.toISOString(),
-  }));
+  return rows.map(({ upload, bookTitle }) => toListItem(upload, bookTitle ?? null));
 }
 
-async function countUploadsToday(userId: string): Promise<number> {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const rows = await db
-    .select({ id: authorUploads.id })
-    .from(authorUploads)
-    .where(and(eq(authorUploads.userId, userId), gte(authorUploads.createdAt, since)))
-    .limit(UPLOAD_MAX_PER_DAY);
-  return rows.length;
+type UserRow = { id: string; name: string | null; email: string; hubspotContactId: string | null };
+
+async function getUserRow(userId: string): Promise<UserRow> {
+  const [user] = await db
+    .select({ id: users.id, name: users.name, email: users.email, hubspotContactId: users.hubspotContactId })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user) throw new UploadError("We couldn't find your account. Please sign in again.");
+  return user;
 }
 
-export type CreateUploadInput = {
+export type CreateUploadSessionInput = {
   /** Must belong to `userId` if provided — checked via listBooksForUser, never trusted as-is. */
   bookId?: string | null;
   kind: UploadKind;
   note?: string | null;
-  file: File;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+export type UploadSessionResult = {
+  uploadId: string;
+  /** null in demo mode: there's nothing for the browser to PUT to. */
+  sessionUri: string | null;
 };
 
 /**
- * Validates, rate-limits, uploads to Drive (or fakes it in demo mode), records the row, audits,
- * and notifies staff. Every step that can fail throws UploadError with author-safe copy.
+ * Step 1 of the two-step protocol. Runs every validation that used to happen in the old
+ * whole-file server action — allowed extension/size, per-day rate limit, bookId ownership — up
+ * front, before Drive is ever contacted. Only after all of that passes does it ensure the Drive
+ * folder tree, open a resumable session, and insert the "pending" row.
  */
-export async function createUploadForUser(userId: string, input: CreateUploadInput): Promise<AuthorUpload> {
-  if (await countUploadsToday(userId) >= UPLOAD_MAX_PER_DAY) {
+export async function createUploadSessionForUser(userId: string, input: CreateUploadSessionInput): Promise<UploadSessionResult> {
+  await expirePendingUploadsForUser(userId);
+
+  if ((await countUploadsToday(userId)) >= UPLOAD_MAX_PER_DAY) {
     throw new UploadError(`You've reached today's limit of ${UPLOAD_MAX_PER_DAY} uploads. Please try again tomorrow.`);
   }
 
   let bookTitle: string | null = null;
   if (input.bookId) {
-    const ownedBooks = await listBooksForUser(userId);
-    const owned = ownedBooks.find((b) => b.id === input.bookId);
-    if (!owned) {
-      throw new UploadError("That book isn't associated with your account.");
-    }
+    const owned = (await listBooksForUser(userId)).find((b) => b.id === input.bookId);
+    if (!owned) throw new UploadError("That book isn't associated with your account.");
     bookTitle = owned.title;
   }
 
-  const { mimeType, bytes } = await validateFile(input.file);
-  const fileName = sanitizeFilename(input.file.name || "upload");
+  const demo = isDemoMode();
+  const { mimeType } = validateUploadMeta(
+    { fileName: input.fileName, mimeType: input.mimeType, sizeBytes: input.sizeBytes },
+    { maxBytes: demo ? DEMO_MAX_UPLOAD_BYTES : MAX_UPLOAD_BYTES },
+  );
+  const fileName = sanitizeFilename(input.fileName || "upload");
   const note = input.note?.trim() || null;
+  const user = await getUserRow(userId);
 
-  const [user] = await db.select({ id: users.id, name: users.name, email: users.email, hubspotContactId: users.hubspotContactId }).from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) throw new UploadError("We couldn't find your account. Please sign in again.");
-  const authorName = user.name?.trim() || user.email;
-
-  let driveFileId: string;
-  let driveFolderId: string | null = null;
-  let driveWebViewLink: string | null = null;
-  let status: AuthorUpload["status"] = "stored";
-
-  if (isDemoMode()) {
-    // Demo mode never touches Google: no service account is configured. Fake an id so the row
-    // still round-trips through the UI exactly like a real upload would.
-    driveFileId = `demo-${randomUUID()}`;
-    status = "demo";
-  } else {
-    if (!isUploadsConfigured() || !env.GOOGLE_UPLOADS_ROOT_FOLDER_ID) {
-      throw new UploadError("Uploads aren't set up yet. Please contact your Author Manager.");
-    }
-    const rootFolderId = env.GOOGLE_UPLOADS_ROOT_FOLDER_ID;
-    const authorFolderName = sanitizeFilename(`${authorName} (${user.hubspotContactId ?? user.id})`);
-    const bookFolderName = sanitizeFilename(bookTitle ?? "General");
-    try {
-      const authorFolderId = await ensureFolder(rootFolderId, authorFolderName);
-      const bookFolderId = await ensureFolder(authorFolderId, bookFolderName);
-      const uploaded = await uploadFile({ folderId: bookFolderId, name: fileName, mimeType, bytes });
-      driveFileId = uploaded.id;
-      driveFolderId = bookFolderId;
-      driveWebViewLink = uploaded.webViewLink;
-    } catch (err) {
-      await audit(
+  if (demo) {
+    // Demo mode never touches Google: no service account is configured, and per the brief, no
+    // bytes should be sent anywhere even to our own server. The row starts "pending" just like
+    // the real flow and is flipped to "demo" by completeUploadForUser below.
+    const [row] = await db
+      .insert(authorUploads)
+      .values({
         userId,
-        "author.upload.failed",
-        { targetType: "author_upload", meta: { fileName, error: err instanceof Error ? err.message : String(err) } },
-      );
-      throw new UploadError("We couldn't send that file just now. Please try again in a moment.");
-    }
+        bookId: input.bookId || null,
+        driveFileId: `pending-${randomUUID()}`,
+        driveFolderId: null,
+        driveWebViewLink: null,
+        fileName,
+        mimeType,
+        sizeBytes: input.sizeBytes,
+        kind: input.kind,
+        note,
+        status: PENDING,
+      })
+      .returning();
+    return { uploadId: row.id, sessionUri: null };
+  }
+
+  if (!isUploadsConfigured() || !env.GOOGLE_UPLOADS_ROOT_FOLDER_ID) {
+    throw new UploadError("Uploads aren't set up yet. Please contact your Author Manager.");
+  }
+
+  const rootFolderId = env.GOOGLE_UPLOADS_ROOT_FOLDER_ID;
+  const authorName = user.name?.trim() || user.email;
+  const authorFolderName = sanitizeFilename(`${authorName} (${user.hubspotContactId ?? user.id})`);
+  const bookFolderName = sanitizeFilename(bookTitle ?? "General");
+
+  let bookFolderId: string;
+  let sessionUri: string;
+  try {
+    const authorFolderId = await ensureFolder(rootFolderId, authorFolderName);
+    bookFolderId = await ensureFolder(authorFolderId, bookFolderName);
+    sessionUri = await createResumableSession({ folderId: bookFolderId, name: fileName, mimeType, sizeBytes: input.sizeBytes });
+  } catch (err) {
+    await audit(userId, "author.upload.failed", {
+      targetType: "author_upload",
+      meta: { fileName, error: err instanceof Error ? err.message : String(err) },
+    });
+    throw new UploadError("We couldn't start that upload just now. Please try again in a moment.");
   }
 
   const [row] = await db
@@ -235,36 +246,99 @@ export async function createUploadForUser(userId: string, input: CreateUploadInp
     .values({
       userId,
       bookId: input.bookId || null,
-      driveFileId,
-      driveFolderId,
-      driveWebViewLink,
+      driveFileId: `pending-${randomUUID()}`,
+      driveFolderId: bookFolderId,
+      driveWebViewLink: null,
       fileName,
       mimeType,
-      sizeBytes: input.file.size,
+      sizeBytes: input.sizeBytes,
       kind: input.kind,
       note,
-      status,
+      status: PENDING,
     })
     .returning();
 
-  await audit(
-    userId,
-    "author.upload",
-    {
+  return { uploadId: row.id, sessionUri };
+}
+
+export type CompleteUploadInput = {
+  uploadId: string;
+  /** The id the browser read out of the final resumable PUT's JSON body. Required for a real
+   *  (non-demo) upload; ignored in demo mode, where nothing was ever sent to Drive. */
+  driveFileId?: string | null;
+};
+
+/** Step 2: called once the browser's direct-to-Drive PUT has finished. Verifies the row belongs
+ *  to `userId` and is still "pending", confirms with Drive what landed, and flips the row to
+ *  "stored" (or "demo"). Notifies staff and audits on success, same as the old single-step flow. */
+export async function completeUploadForUser(userId: string, input: CompleteUploadInput): Promise<AuthorUpload> {
+  const [row] = await db
+    .select()
+    .from(authorUploads)
+    .where(and(eq(authorUploads.id, input.uploadId), eq(authorUploads.userId, userId)))
+    .limit(1);
+  if (!row) throw new UploadError("We couldn't find that upload.");
+
+  if (row.status !== PENDING) {
+    if (row.status === "failed") throw new UploadError("That upload session expired. Please try sending the file again.");
+    // Already completed by an earlier call (e.g. a retried request) — treat as a no-op success.
+    return row;
+  }
+
+  const demo = isDemoMode();
+  const user = await getUserRow(userId);
+  const authorName = user.name?.trim() || user.email;
+  const bookTitle = row.bookId ? ((await listBooksForUser(userId)).find((b) => b.id === row.bookId)?.title ?? null) : null;
+
+  if (demo) {
+    const [updated] = await db
+      .update(authorUploads)
+      .set({ status: "demo", driveFileId: `demo-${randomUUID()}` })
+      .where(eq(authorUploads.id, row.id))
+      .returning();
+    await audit(userId, "author.upload", {
       targetType: "author_upload",
       targetId: row.id,
-      meta: { fileName, sizeBytes: input.file.size, kind: input.kind, bookId: input.bookId ?? null, status },
-    },
-  );
+      meta: { fileName: row.fileName, sizeBytes: row.sizeBytes, kind: row.kind, bookId: row.bookId, status: "demo" },
+    });
+    return updated;
+  }
 
-  if (!isDemoMode() && env.RESEND_API_KEY && env.UPLOADS_NOTIFY_EMAIL) {
+  if (!input.driveFileId) throw new UploadError("Missing the uploaded file's id.");
+
+  let finalized: Awaited<ReturnType<typeof finalizeUploadedFile>>;
+  try {
+    finalized = await finalizeUploadedFile(input.driveFileId);
+  } catch (err) {
+    await markUploadFailed(row, userId, err);
+    throw new UploadError("We couldn't confirm that file arrived. Please try sending it again.");
+  }
+
+  if (finalized.size != null && finalized.size !== row.sizeBytes) {
+    await markUploadFailed(row, userId, new Error(`size mismatch: expected ${row.sizeBytes}, got ${finalized.size}`));
+    throw new UploadError("That file didn't arrive completely. Please try sending it again.");
+  }
+
+  const [updated] = await db
+    .update(authorUploads)
+    .set({ status: "stored", driveFileId: finalized.id, driveWebViewLink: finalized.webViewLink })
+    .where(eq(authorUploads.id, row.id))
+    .returning();
+
+  await audit(userId, "author.upload", {
+    targetType: "author_upload",
+    targetId: row.id,
+    meta: { fileName: row.fileName, sizeBytes: row.sizeBytes, kind: row.kind, bookId: row.bookId, status: "stored" },
+  });
+
+  if (env.RESEND_API_KEY && env.UPLOADS_NOTIFY_EMAIL) {
     try {
       await sendUploadNotificationEmail(env.UPLOADS_NOTIFY_EMAIL, {
         authorName,
         bookTitle,
-        fileName,
-        sizeBytes: input.file.size,
-        driveWebViewLink,
+        fileName: row.fileName,
+        sizeBytes: row.sizeBytes,
+        driveWebViewLink: finalized.webViewLink,
       });
     } catch {
       // Notification is best-effort — the file is already safely stored and audited, so a
@@ -272,5 +346,14 @@ export async function createUploadForUser(userId: string, input: CreateUploadInp
     }
   }
 
-  return row;
+  return updated;
+}
+
+async function markUploadFailed(row: AuthorUpload, userId: string, err: unknown): Promise<void> {
+  await db.update(authorUploads).set({ status: "failed" }).where(eq(authorUploads.id, row.id));
+  await audit(userId, "author.upload.failed", {
+    targetType: "author_upload",
+    targetId: row.id,
+    meta: { fileName: row.fileName, error: err instanceof Error ? err.message : String(err) },
+  });
 }

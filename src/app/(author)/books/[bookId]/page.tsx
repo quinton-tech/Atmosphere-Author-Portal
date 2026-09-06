@@ -34,7 +34,9 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
   const book = await getBookForUser(effectiveUserId(user), bookId);
   if (!book) notFound();
 
-  const isPublished = Boolean(book.currentStage?.isTerminal);
+  // Named to avoid confusion with BookDetail.isPublished (a different, publicationDate-based
+  // signal used by BookHeader) — this one is "the pipeline has reached its terminal stage".
+  const isTerminalStage = Boolean(book.currentStage?.isTerminal);
   const suggestedQuestions = suggestedQuestionsFor(
     book.currentStage ? { label: book.currentStage.label, isTerminal: book.currentStage.isTerminal } : null,
   );
@@ -56,7 +58,7 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
 
       <StatusNow stage={book.currentStage} actions={book.actions} nextUpdate={book.nextUpdate} />
 
-      {isPublished && (
+      {isTerminalStage && (
         <PublishedSummary
           bookId={book.id}
           milestones={book.milestones}
@@ -66,7 +68,7 @@ export default async function BookPage({ params }: { params: Promise<{ bookId: s
       )}
 
       <section className="mt-12">
-        {isPublished ? (
+        {isTerminalStage ? (
           <details>
             <summary className="eyebrow cursor-pointer">Production history</summary>
             <div className="mt-6">

@@ -20,9 +20,24 @@ function EmptyState({ title, message }: { title: string; message: string }) {
   );
 }
 
+const EMPTY_COPY: Record<"not_connected" | "unavailable" | "empty", { title: string; message: string }> = {
+  not_connected: {
+    title: "Messages aren't connected yet.",
+    message: "Your account isn't linked to your Atmosphere contact yet — reach out to your main contact and this will get set up.",
+  },
+  unavailable: {
+    title: "Messages aren't available yet.",
+    message: "Check back soon, or reach out to your main contact directly.",
+  },
+  empty: {
+    title: "No messages yet.",
+    message: "Emails your team sends you will show up here.",
+  },
+};
+
 export default async function MessagesPage() {
   const user = await requireUser();
-  const { messages, unavailable, lastSyncedAt } = await getMessagesForUser(effectiveUserId(user));
+  const { messages, state, lastSyncedAt } = await getMessagesForUser(effectiveUserId(user));
 
   return (
     <div className="max-w-[72ch] pb-16">
@@ -31,16 +46,16 @@ export default async function MessagesPage() {
         Emails your Atmosphere team has sent you, and your replies, as logged on your account.
       </p>
 
-      {messages.length === 0 && unavailable ? (
-        <EmptyState
-          title="Messages aren't available yet."
-          message="Check back soon, or reach out to your main contact directly."
-        />
-      ) : messages.length === 0 ? (
-        <EmptyState title="No messages yet." message="Emails your team sends you will show up here." />
+      {messages.length === 0 ? (
+        <EmptyState {...(EMPTY_COPY[state as "not_connected" | "unavailable" | "empty"] ?? EMPTY_COPY.empty)} />
       ) : (
         <>
-          {unavailable && (
+          {state === "stale_error" && lastSyncedAt && (
+            <p className="mt-6 rounded-md bg-warn/10 px-3 py-2 text-sm text-warn">
+              We couldn&apos;t reach the mailbox just now — showing what we have from {formatDate(lastSyncedAt)}.
+            </p>
+          )}
+          {state === "unavailable" && (
             <p className="mt-6 rounded-md bg-warn/10 px-3 py-2 text-sm text-warn">
               We couldn&apos;t refresh your messages just now — showing the most recent ones we have.
             </p>

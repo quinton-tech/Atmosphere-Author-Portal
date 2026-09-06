@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { users, sessions } from "@/db/schema";
 import { signIn } from "@/auth";
@@ -72,4 +72,46 @@ export async function revokeAccess(userId: string): Promise<void> {
 /** Deletes every database session for this user, forcing a fresh sign-in everywhere. */
 export async function forceSignOut(userId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.userId, userId));
+}
+
+/** Count of other active (role admin, not disabled) admins, excluding `excludingUserId`. */
+async function countOtherActiveAdmins(excludingUserId: string): Promise<number> {
+  const rows = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.role, "admin"), isNull(users.disabledAt), ne(users.id, excludingUserId)));
+  return rows.length;
+}
+
+/**
+ * `revokeAccess`, guarded for the admin panel: refuses to let an admin revoke their own account
+ * (which would immediately sign them out of the very panel they're using) and refuses to revoke
+ * the last remaining active admin (which would lock every admin out of `/admin` — nothing short
+ * of direct DB access could undo it). Defence in depth alongside the same checks in
+ * `src/app/admin/authors/actions.ts`.
+ */
+export async function adminRevokeAccess(userId: string, actingAdminId: string): Promise<void> {
+  if (userId === actingAdminId) {
+    throw new Error("You can't revoke your own access. Ask another admin to do it.");
+  }
+  const [target] = await db.select({ role: users.role, disabledAt: users.disabledAt }).from(users).where(eq(users.id, userId)).limit(1);
+  if (!target) throw new Error("Author not found.");
+  if (target.role === "admin" && !target.disabledAt) {
+    const others = await countOtherActiveAdmins(userId);
+    if (others < 1) throw new Error("You can't revoke the last remaining admin.");
+  }
+  await revokeAccess(userId);
+}
+
+/**
+ * `forceSignOut`, guarded for the admin panel: refuses to let an admin force-sign-out their own
+ * account from the Authors table (that would kill their own session mid-workflow with no
+ * confirmation). Self-service "sign out everywhere" on the Account page calls `forceSignOut`
+ * directly and is unaffected — that's an intentional self-service action, not this guard's target.
+ */
+export async function adminForceSignOut(userId: string, actingAdminId: string): Promise<void> {
+  if (userId === actingAdminId) {
+    throw new Error('You can\'t force-sign-out your own account from here — use "Sign out everywhere" on your Account page instead.');
+  }
+  await forceSignOut(userId);
 }

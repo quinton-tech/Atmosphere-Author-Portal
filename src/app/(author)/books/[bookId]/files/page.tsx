@@ -5,17 +5,11 @@ import { getBookForUser } from "@/lib/data/books";
 import { listUploadsForBook } from "@/lib/data/uploads";
 import { effectiveUserId, requireUser } from "@/lib/session";
 
-export default async function BookFilesPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ bookId: string }>;
-  searchParams: Promise<{ ok?: string; error?: string }>;
-}) {
+export default async function BookFilesPage({ params }: { params: Promise<{ bookId: string }> }) {
   const { bookId } = await params;
   const user = await requireUser();
   const userId = effectiveUserId(user);
-  const [book, sp] = await Promise.all([getBookForUser(userId, bookId), searchParams]);
+  const book = await getBookForUser(userId, bookId);
   if (!book) notFound();
 
   const uploads = await listUploadsForBook(userId, bookId);
@@ -28,7 +22,7 @@ export default async function BookFilesPage({
       <section className="mt-8">
         <h2 className="eyebrow">From your team</h2>
         <div className="mt-4">
-          <FileGrid files={book.files} />
+          <FileGrid files={book.files} filesConnected={book.filesConnected} />
         </div>
       </section>
 
@@ -60,7 +54,7 @@ export default async function BookFilesPage({
         )}
 
         <div className="mt-6">
-          <UploadForm redirectTo={`/books/${bookId}/files`} book={{ id: book.id, title: book.title }} error={sp.error} ok={sp.ok} />
+          <UploadForm book={{ id: book.id, title: book.title }} />
         </div>
       </section>
     </div>

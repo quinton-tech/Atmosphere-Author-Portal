@@ -102,6 +102,7 @@ function StageFields({
 }) {
   const isDerived = stage?.kind === "derived";
   const linked = new Set(stage?.derivedMilestoneIds ?? []);
+  const idPrefix = `${stage?.key ?? "new"}-`;
 
   return (
     <div className="space-y-3">
@@ -113,12 +114,19 @@ function StageFields({
             <span className="font-mono text-xs text-ink-2">{stage.key}</span>
           </div>
         ) : (
-          <Field name="key" label="Key (slug)" placeholder="cover_design" />
+          <Field name="key" label="Key (slug)" placeholder="cover_design" idPrefix={idPrefix} />
         )}
-        <Field name="label" label="Label" placeholder="Cover Design" defaultValue={stage?.label} />
-        <Field name="description" label="Description" placeholder="What's happening now" defaultValue={stage?.description} className="col-span-2" />
-        <Field name="sortOrder" label="Sort order" type="number" defaultValue={stage?.sortOrder ?? 0} />
-        <Field name="typicalWeeks" label="Typical weeks" type="number" defaultValue={stage?.typicalWeeks ?? undefined} />
+        <Field name="label" label="Label" placeholder="Cover Design" defaultValue={stage?.label} idPrefix={idPrefix} />
+        <Field
+          name="description"
+          label="Description"
+          placeholder="What's happening now"
+          defaultValue={stage?.description}
+          className="col-span-2"
+          idPrefix={idPrefix}
+        />
+        <Field name="sortOrder" label="Sort order" type="number" defaultValue={stage?.sortOrder ?? 0} idPrefix={idPrefix} />
+        <Field name="typicalWeeks" label="Typical weeks" type="number" defaultValue={stage?.typicalWeeks ?? undefined} idPrefix={idPrefix} />
         <label className="flex items-center gap-2 self-end text-sm text-ink-2">
           <input type="checkbox" name="isTerminal" defaultChecked={stage?.isTerminal} /> Terminal stage
         </label>
@@ -215,6 +223,7 @@ function Field({
   type = "text",
   defaultValue,
   className = "",
+  idPrefix = "",
 }: {
   name: string;
   label: string;
@@ -222,14 +231,19 @@ function Field({
   type?: string;
   defaultValue?: string | number;
   className?: string;
+  /** This form field set repeats once per stage (add form + one per configured stage), so the id
+   *  must be unique per instance — never just `name` — or every stage's label/description/etc.
+   *  collides and `<label htmlFor>` only ever focuses the first one on the page. */
+  idPrefix?: string;
 }) {
+  const id = `${idPrefix}${name}`;
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
-      <label htmlFor={name} className="eyebrow">
+      <label htmlFor={id} className="eyebrow">
         {label}
       </label>
       <input
-        id={name}
+        id={id}
         name={name}
         type={type}
         placeholder={placeholder}

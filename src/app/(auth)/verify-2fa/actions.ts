@@ -23,7 +23,7 @@ export async function verifyTwoFactorCodeAction(_prev: VerifyTwoFaState, formDat
   const code = String(formData.get("code") ?? "");
   const next = safeAdminNext(formData.get("next"));
 
-  if (isTotpRateLimited(user.id)) {
+  if (await isTotpRateLimited(user.id)) {
     return { error: "Too many attempts. Please wait a few minutes and try again." };
   }
 

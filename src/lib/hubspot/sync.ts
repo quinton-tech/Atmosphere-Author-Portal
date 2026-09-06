@@ -1,10 +1,10 @@
 import "server-only";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { appSettings, bookCache, books, stageConfig, stageMilestones, syncRuns, users, type StageConfig } from "@/db/schema";
+import { actionRules, appSettings, bookCache, books, stageConfig, stageMilestones, syncRuns, users, type StageConfig } from "@/db/schema";
 import { resolveInternalNames, type PropertyMap } from "./properties";
 import { getHubSpotReader, type HubSpotReader } from "./client";
-import { fetchAndPlanPage, planSync, type SyncPlan } from "./plan";
+import { fetchAndPlanKeysetPage, fetchAndPlanPage, planSync, type SyncPlan } from "./plan";
 
 export type { PlannedBook, PlannedCache, PlannedUser, SyncPlan } from "./plan";
 export { fetchAndPlanPage, planSync } from "./plan";
@@ -54,13 +54,39 @@ async function applyPlan(plan: SyncPlan): Promise<{ usersUpserted: number; books
   if (plan.users.length === 0) return { usersUpserted: 0, booksUpserted: 0 };
 
   const userIdByEmail = new Map<string, string>();
+  const profileSyncedAt = new Date();
   for (const batch of chunk(plan.users, 500)) {
     const rows = await db
       .insert(users)
-      .values(batch.map((u) => ({ email: u.email, name: u.name, hubspotContactId: u.hubspotContactId, role: "author" as const })))
+      .values(
+        batch.map((u) => ({
+          email: u.email,
+          name: u.name,
+          hubspotContactId: u.hubspotContactId,
+          role: "author" as const,
+          phone: u.phone,
+          street: u.street,
+          city: u.city,
+          region: u.region,
+          postalCode: u.postalCode,
+          country: u.country,
+          profileSyncedAt,
+        })),
+      )
       .onConflictDoUpdate({
         target: users.email,
-        set: { name: sqlExcluded("name"), hubspotContactId: sqlExcluded("hubspot_contact_id"), updatedAt: new Date() },
+        set: {
+          name: sqlExcluded("name"),
+          hubspotContactId: sqlExcluded("hubspot_contact_id"),
+          phone: sqlExcluded("phone"),
+          street: sqlExcluded("street"),
+          city: sqlExcluded("city"),
+          region: sqlExcluded("region"),
+          postalCode: sqlExcluded("postal_code"),
+          country: sqlExcluded("country"),
+          profileSyncedAt: sqlExcluded("profile_synced_at"),
+          updatedAt: new Date(),
+        },
       })
       .returning({ id: users.id, email: users.email });
     for (const r of rows) userIdByEmail.set(r.email, r.id);
@@ -77,7 +103,12 @@ async function applyPlan(plan: SyncPlan): Promise<{ usersUpserted: number; books
       .values(values)
       .onConflictDoUpdate({
         target: books.hubspotProjectId,
-        set: { title: sqlExcluded("title"), userId: sqlExcluded("user_id"), updatedAt: new Date() },
+        set: {
+          // Keep a title staff set in the portal when HubSpot has none ("Untitled" is the planner's fallback).
+          title: sql`CASE WHEN excluded.title = 'Untitled' THEN ${books.title} ELSE excluded.title END`,
+          userId: sqlExcluded("user_id"),
+          updatedAt: new Date(),
+        },
       })
       .returning({ id: books.id, hubspotProjectId: books.hubspotProjectId });
     for (const r of rows) bookIdByProjectId.set(r.hubspotProjectId, r.id);
@@ -128,7 +159,7 @@ async function loadSyncConfig(reader: HubSpotReader): Promise<{
   owners: Map<string, { name: string; email: string | null }>;
   extraProperties: string[];
 }> {
-  const [schema, stageRows, propertyMapSetting, titlePropertySetting, owners, milestoneRows] = await Promise.all([
+  const [schema, stageRows, propertyMapSetting, titlePropertySetting, owners, milestoneRows, ruleRows] = await Promise.all([
     reader.getProjectSchema(),
     // `kind` lets resolveStageKey ignore "derived" rows (no HubSpot mapping of their own) below.
     db.select({ key: stageConfig.key, hubspotValues: stageConfig.hubspotValues, kind: stageConfig.kind }).from(stageConfig),
@@ -160,6 +191,10 @@ async function loadSyncConfig(reader: HubSpotReader): Promise<{
       })
       .from(stageMilestones)
       .where(eq(stageMilestones.enabled, true)),
+    // Action rules can target a raw HubSpot property that isn't one of the portal's displayed
+    // properties (e.g. "payment_status"). Without caching it too, `evaluateActionRules` could never
+    // match it — see review finding #2 and `rules.ts`'s `resolveRuleValue`/`rulePropertyIsAvailable`.
+    db.select({ propertyName: actionRules.propertyName }).from(actionRules).where(eq(actionRules.enabled, true)),
   ]);
   const { map, unresolved } = resolveInternalNames(schema.properties, propertyMapSetting ?? {});
 
@@ -171,6 +206,7 @@ async function loadSyncConfig(reader: HubSpotReader): Promise<{
       ...milestoneRows.flatMap((m) => [m.propertyName, m.linkProperty, m.dateProperty, m.venueProperty, m.includeRule?.property?.name]).filter(
         (v): v is string => !!v,
       ),
+      ...ruleRows.map((r) => r.propertyName),
       ...stageEnteredProps,
     ]),
   ];
@@ -196,7 +232,29 @@ async function loadSyncConfig(reader: HubSpotReader): Promise<{
 // suggested schema follow-up (a `cursorAfter text` column on sync_runs would be the tidier fix).
 // ---------------------------------------------------------------------------
 
-type ResumeState = { syncRunId: string; after?: string; sinceIso: string | null; runStartedAtIso: string };
+// HubSpot caps any single search query (one filter/sort combination, paged with `after`) at 10,000
+// matched results — https://developers.hubspot.com/docs/api-reference/latest/crm/search-the-crm.
+// With 2,046 Projects today and 15k-20k targeted (CLAUDE.md), a full sync's single unbounded search
+// would eventually break. `runPagedSync` instead pages full sync via `searchProjectsAfterId`'s
+// keyset pagination (sorted/filtered on `hs_object_id`, never using `after` beyond one page — see
+// HubSpotReader's doc comment) so each restart gets its own fresh 10,000-result budget. Incremental
+// sync (since a date) keeps the cheaper `after`-cursor approach, since it stays well under 10k in
+// normal operation, but falls back to the same keyset path mid-run if a since-based query's `total`
+// ever approaches the ceiling (e.g. catching up after a long outage).
+const SEARCH_RESULT_CEILING = 10_000;
+
+type SyncMode = "cursor" | "keyset";
+
+type ResumeState = {
+  syncRunId: string;
+  after?: string;
+  sinceIso: string | null;
+  runStartedAtIso: string;
+  /** "cursor" (after-based) or "keyset" (hs_object_id-based); full sync always uses "keyset". */
+  mode?: SyncMode;
+  /** Keyset watermark: the last hs_object_id processed. Null/undefined = start from the beginning. */
+  lastObjectId?: string | null;
+};
 
 function resumeKey(kind: "incremental" | "full"): string {
   return `hubspot:${kind}SyncCursor`;
@@ -228,6 +286,8 @@ async function runPagedSync(kind: "incremental" | "full", opts: { maxDurationMs?
   let syncRunId: string;
   let since: Date | null;
   let after: string | undefined;
+  let mode: SyncMode;
+  let lastObjectId: string | null;
   let runStartedAt: Date;
   let processed = 0;
   let created = 0;
@@ -238,6 +298,10 @@ async function runPagedSync(kind: "incremental" | "full", opts: { maxDurationMs?
     syncRunId = resumeState.syncRunId;
     since = resumeState.sinceIso ? new Date(resumeState.sinceIso) : null;
     after = resumeState.after;
+    // Older resume-state rows (persisted before keyset pagination existed) have no `mode`/
+    // `lastObjectId`; default them by kind so a resumed run keeps behaving as it did before.
+    mode = resumeState.mode ?? (kind === "full" ? "keyset" : "cursor");
+    lastObjectId = resumeState.lastObjectId ?? null;
     runStartedAt = new Date(resumeState.runStartedAtIso);
     const [existing] = await db.select().from(syncRuns).where(eq(syncRuns.id, syncRunId)).limit(1);
     processed = existing?.processed ?? 0;
@@ -251,9 +315,14 @@ async function runPagedSync(kind: "incremental" | "full", opts: { maxDurationMs?
     const [row] = await db.insert(syncRuns).values({ kind, status: "running", startedAt: runStartedAt }).returning();
     syncRunId = row.id;
     after = undefined;
+    // Full sync always walks the whole object space by id; incremental starts on the cheaper
+    // after-cursor path and only drops to keyset if it turns out to need more than 10k results.
+    mode = kind === "full" ? "keyset" : "cursor";
+    lastObjectId = null;
   }
 
   const { stages, propertyMap, titleProperty, unresolved, owners, extraProperties } = await loadSyncConfig(reader);
+  const pageConfig = { stages, propertyMap, titleProperty, owners, extraProperties };
   const enumValuesSeenAcc: Record<string, string[]> = {};
   let done = false;
   const errors: string[] = [];
@@ -261,17 +330,45 @@ async function runPagedSync(kind: "incremental" | "full", opts: { maxDurationMs?
   try {
     for (;;) {
       if (Date.now() - budgetStart > maxDurationMs) break;
-      const { plan, nextAfter } = await fetchAndPlanPage(reader, since, after, { stages, propertyMap, titleProperty, owners, extraProperties });
+
+      let plan: SyncPlan;
+      let pageCount: number;
+      if (mode === "keyset") {
+        const result = await fetchAndPlanKeysetPage(reader, lastObjectId, since, pageConfig);
+        plan = result.plan;
+        pageCount = plan.books.length + plan.unmatchedProjectIds.length;
+        lastObjectId = result.lastObjectId;
+      } else {
+        const result = await fetchAndPlanPage(reader, since, after, pageConfig);
+        plan = result.plan;
+        pageCount = plan.books.length + plan.unmatchedProjectIds.length;
+        after = result.nextAfter;
+        // The since-based query is approaching (or has hit) HubSpot's 10,000-result search
+        // ceiling: switch to keyset pagination (still scoped by `since`) for the rest of this run
+        // rather than risk the next `after` page failing outright. Re-processing whatever this
+        // run already applied via the cursor path is harmless — applyPlan is an idempotent upsert.
+        if (result.total !== undefined && result.total >= SEARCH_RESULT_CEILING) {
+          mode = "keyset";
+          lastObjectId = null;
+          after = undefined;
+        }
+      }
+
       const applied = await applyPlan(plan);
-      processed += plan.books.length + plan.unmatchedProjectIds.length;
+      processed += pageCount;
       created += applied.usersUpserted;
       updated += applied.booksUpserted;
       unmatched += plan.unmatchedProjectIds.length;
       for (const [id, values] of Object.entries(plan.enumValuesSeen)) {
         enumValuesSeenAcc[id] = [...new Set([...(enumValuesSeenAcc[id] ?? []), ...values])];
       }
-      after = nextAfter;
-      if (!after) {
+
+      // Done when the current mode has no more pages: keyset stops on an empty page (every
+      // returned Project lands in exactly one of `books`/`unmatchedProjectIds`, so pageCount === 0
+      // means the search returned nothing new past `lastObjectId`); cursor stops when HubSpot omits
+      // a `next.after`. A mode switch above always leaves `after` cleared, so it can't look "done".
+      const noMorePages = mode === "keyset" ? pageCount === 0 : !after;
+      if (noMorePages) {
         done = true;
         break;
       }
@@ -303,7 +400,14 @@ async function runPagedSync(kind: "incremental" | "full", opts: { maxDurationMs?
     // run rather than looping forever against whatever page caused the failure.
     await deleteAppSetting(key);
   } else {
-    await setAppSetting(key, { syncRunId, after, sinceIso: since?.toISOString() ?? null, runStartedAtIso: runStartedAt.toISOString() } satisfies ResumeState);
+    await setAppSetting(key, {
+      syncRunId,
+      after,
+      sinceIso: since?.toISOString() ?? null,
+      runStartedAtIso: runStartedAt.toISOString(),
+      mode,
+      lastObjectId,
+    } satisfies ResumeState);
   }
 
   return { syncRunId, done, processed, created, updated, unmatched };
@@ -326,10 +430,14 @@ export async function syncSingleProject(hubspotProjectId: string): Promise<{ ok:
   const project = await reader.getProject(hubspotProjectId);
   if (!project) return { ok: false, error: "This project could not be found in HubSpot." };
 
-  const { stages, propertyMap, titleProperty, owners, extraProperties } = await loadSyncConfig(reader);
+  const { stages, propertyMap, titleProperty, owners, extraProperties, unresolved } = await loadSyncConfig(reader);
   const contacts = await reader.getContactsByIds(project.contactIds);
   const plan = planSync([project], contacts, stages, propertyMap, { titleProperty, owners, extraProperties });
   await applyPlan(plan);
+  // Same label-discovery bookkeeping the paged syncs do, so a manual "Refresh from HubSpot" surfaces
+  // new enum values / unresolved properties to admin just like a scheduled run would (finding #3).
+  await mergeEnumValuesSeen(plan.enumValuesSeen);
+  await setAppSetting("propertyUnresolved", unresolved);
   await db.insert(syncRuns).values({
     kind: "single",
     status: "ok",
@@ -349,11 +457,13 @@ export async function syncAuthor(userId: string): Promise<{ ok: boolean; process
   const projects = await reader.getProjectsForContact(user.hubspotContactId);
   if (projects.length === 0) return { ok: true, processed: 0, errors: [] };
 
-  const { stages, propertyMap, titleProperty, owners, extraProperties } = await loadSyncConfig(reader);
+  const { stages, propertyMap, titleProperty, owners, extraProperties, unresolved } = await loadSyncConfig(reader);
   const contactIds = [...new Set(projects.flatMap((p) => p.contactIds))];
   const contacts = await reader.getContactsByIds(contactIds);
   const plan = planSync(projects, contacts, stages, propertyMap, { titleProperty, owners, extraProperties });
   await applyPlan(plan);
+  await mergeEnumValuesSeen(plan.enumValuesSeen);
+  await setAppSetting("propertyUnresolved", unresolved);
   await db.insert(syncRuns).values({
     kind: "single",
     status: "ok",

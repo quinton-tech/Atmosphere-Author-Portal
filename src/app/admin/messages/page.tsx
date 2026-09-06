@@ -49,9 +49,18 @@ export default async function AdminMessagesPage() {
             <tr key={r.userId}>
               <Td>{r.name ?? "—"}</Td>
               <Td>{r.email}</Td>
-              <Td>{fmtDateTime(r.lastSyncedAt)}</Td>
+              <Td>{r.lastSyncedAt ? fmtDateTime(r.lastSyncedAt) : <span className="text-muted">Never synced</span>}</Td>
               <Td className="tabular">{r.messageCount}</Td>
-              <Td>{r.lastError ? <Badge tone="bad">{r.lastError}</Badge> : "—"}</Td>
+              <Td>
+                {r.lastError ? (
+                  <div>
+                    <Badge tone="bad">{r.lastError}</Badge>
+                    {!r.lastSyncedAt ? <p className="mt-1 text-xs text-muted">No successful sync yet.</p> : null}
+                  </div>
+                ) : (
+                  "—"
+                )}
+              </Td>
             </tr>
           ))}
           {rows.length === 0 ? (

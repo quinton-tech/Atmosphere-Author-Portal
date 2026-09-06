@@ -10,6 +10,10 @@ import { hash as argon2Hash, verify as argon2Verify } from "@node-rs/argon2";
 
 export const PASSWORD_MIN_LENGTH = 12;
 
+/** User-facing copy for both the "set/change password" and "reset password" forms — keep in sync
+ *  with the enforcement in `password.ts`'s `checkPasswordStrength` (length + HIBP breach check). */
+export const PASSWORD_RULES_TEXT = `Use at least ${PASSWORD_MIN_LENGTH} characters. We check new passwords against known data breaches, so pick one that isn't already public.`;
+
 // @node-rs/argon2's `Algorithm` is declared as an ambient `const enum`, which
 // can't be referenced under `isolatedModules` (set in tsconfig.json). Argon2id
 // is the package's own default (see its docs), so we simply don't pass one —

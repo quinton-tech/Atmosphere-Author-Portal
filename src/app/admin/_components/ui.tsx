@@ -120,11 +120,21 @@ export function FormSuccess({ message }: { message?: string | null }) {
   );
 }
 
-export function Pagination({ hasMore, nextHref }: { hasMore: boolean; nextHref: string }) {
-  if (!hasMore) return null;
+export function Pagination({
+  hasMore,
+  nextHref,
+  prevHref,
+}: {
+  hasMore: boolean;
+  nextHref: string;
+  /** Omit (or null) on page 1 — there's nothing to go back to. */
+  prevHref?: string | null;
+}) {
+  if (!hasMore && !prevHref) return null;
   return (
-    <div className="mt-4 flex justify-end">
-      <PillLink href={nextHref}>Next page →</PillLink>
+    <div className="mt-4 flex items-center justify-between">
+      <div>{prevHref ? <PillLink href={prevHref}>← Previous page</PillLink> : null}</div>
+      <div>{hasMore ? <PillLink href={nextHref}>Next page →</PillLink> : null}</div>
     </div>
   );
 }

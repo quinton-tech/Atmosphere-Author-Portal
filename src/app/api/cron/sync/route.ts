@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, after } from "next/server";
 import { env, isDemoMode } from "@/lib/env";
 import { runFullSync, runIncrementalSync } from "@/lib/hubspot/sync";
+import { expireStalePendingUploads } from "@/lib/data/uploads";
 
 // Full syncs (≈200 pages at 20k Projects) can outrun a single invocation; give this route the
 // platform max and let it self-continue via `after()` below when a run isn't done yet.
@@ -29,9 +30,15 @@ export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
   if (!isValidCronAuth(authHeader)) return unauthorized();
 
+  // Abandoned upload sessions (the browser never finished its direct-to-Drive PUT, or never
+  // called /api/uploads/complete) shouldn't sit as "pending" forever — see the two-step protocol
+  // in src/lib/data/uploads.ts. Runs regardless of demo mode: demo uploads use the same Postgres
+  // rows even though Drive itself is never involved.
+  const expiredUploads = await expireStalePendingUploads();
+
   // Demo mode has no HubSpot credentials; the fixture author is seeded directly (`--demo` seed),
   // so there's nothing to sync.
-  if (isDemoMode()) return NextResponse.json({ skipped: "demo mode" }, { status: 200 });
+  if (isDemoMode()) return NextResponse.json({ skipped: "demo mode", expiredUploads }, { status: 200 });
 
   const url = new URL(request.url);
   const kind = url.searchParams.get("kind") === "full" ? "full" : "incremental";
@@ -57,5 +64,5 @@ export async function GET(request: Request) {
     });
   }
 
-  return NextResponse.json({ kind, ...result });
+  return NextResponse.json({ kind, expiredUploads, ...result });
 }

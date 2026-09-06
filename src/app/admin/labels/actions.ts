@@ -5,14 +5,11 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { propertyDisplay } from "@/db/schema";
 import { requireAdmin } from "@/lib/session";
-import { audit, type AuditAction } from "@/lib/audit";
+import { audit } from "@/lib/audit";
 import { redirectWithFlash, runAction } from "../_lib/flash";
 
 const LIST_PATH = "/admin/labels";
-
-// TODO(lead): src/lib/audit.ts is off-limits to this agent. Add
-// "admin.property_display.update" to the AuditAction union and drop this cast.
-const PROPERTY_DISPLAY_UPDATE: AuditAction = "admin.property_display.update";
+const PROPERTY_DISPLAY_UPDATE = "admin.property_display.update" as const;
 
 const labelSchema = z.object({
   propertyId: z.string().trim().min(1),

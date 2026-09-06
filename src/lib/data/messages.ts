@@ -27,11 +27,22 @@ export type MessageSummary = {
 
 export type MessageDetail = MessageSummary & { bodyText: string | null };
 
+/**
+ * - "not_connected": this author isn't linked to a HubSpot contact at all — nothing has ever been
+ *   attempted.
+ * - "unavailable": the most recent attempt failed with a HubSpot scope error (missing
+ *   `sales-email-read`), or it failed and there has never been a successful sync — nothing useful
+ *   to show.
+ * - "stale_error": cached messages exist (from a past successful sync), but the latest refresh
+ *   attempt failed — show the cache with a "couldn't refresh" note.
+ * - "empty": synced successfully at least once, with zero messages.
+ * - "ok": synced successfully with messages to show.
+ */
+export type MessagesState = "not_connected" | "unavailable" | "stale_error" | "empty" | "ok";
+
 export type MessagesResult = {
   messages: MessageSummary[];
-  /** True if the last refresh attempt failed with a HubSpot scope error (missing
-   *  `sales-email-read`) — the UI shows "messages aren't available yet" rather than erroring. */
-  unavailable: boolean;
+  state: MessagesState;
   lastSyncedAt: string | null;
 };
 
@@ -109,58 +120,90 @@ async function replaceCachedMessages(userId: string, records: ContactEmailRecord
   }
 }
 
-async function markSynced(userId: string, lastError: string | null): Promise<void> {
+/** Only ever written on a SUCCESSFUL sync — `lastSyncedAt` means "last time this actually worked."
+ *  Clears any previous error, since the cache is now current. */
+async function markSyncSuccess(userId: string): Promise<void> {
   const now = new Date();
   await db
     .insert(contactEmailSync)
-    .values({ userId, lastSyncedAt: now, lastError })
-    .onConflictDoUpdate({ target: contactEmailSync.userId, set: { lastSyncedAt: now, lastError } });
+    .values({ userId, lastSyncedAt: now, lastError: null })
+    .onConflictDoUpdate({ target: contactEmailSync.userId, set: { lastSyncedAt: now, lastError: null } });
 }
 
-/** Refresh this user's cached messages from HubSpot if stale (or never synced) and they're linked
- *  to a HubSpot contact. Returns whether messages are currently unavailable (missing scope). Never
- *  throws — a HubSpot failure is recorded on `contact_email_sync.lastError` and swallowed, so the
- *  caller always falls back to whatever's cached. */
-async function refreshIfStale(userId: string): Promise<{ unavailable: boolean }> {
-  if (isDemoMode()) return { unavailable: false };
+/** Records a failed attempt WITHOUT touching `lastSyncedAt` — `contact_email_sync` has no separate
+ *  "last attempt" column, so leaving the last-success timestamp alone (rather than bumping it, as
+ *  this used to do) is what lets `getMessagesForUser` tell "never synced" apart from "synced once,
+ *  a while ago, and the most recent refresh failed." It also keeps the cache "stale" so the next
+ *  request tries again rather than waiting out a full REFRESH_INTERVAL_MS on a row that never
+ *  actually succeeded. */
+async function markSyncFailure(userId: string, message: string): Promise<void> {
+  await db
+    .insert(contactEmailSync)
+    .values({ userId, lastSyncedAt: null, lastError: message })
+    .onConflictDoUpdate({ target: contactEmailSync.userId, set: { lastError: message } });
+}
 
+/** Refresh this user's cached messages from HubSpot if stale (or never successfully synced) and
+ *  they're linked to a HubSpot contact. Never throws — a HubSpot failure is recorded on
+ *  `contact_email_sync.lastError` and swallowed, so the caller always falls back to whatever's
+ *  cached. Returns whether THIS attempt specifically hit a scope error, for the caller's state
+ *  computation (a scope error is permanent, so it always reads as "unavailable" even once the
+ *  request below re-reads a `lastError` that might otherwise look like a transient blip). */
+async function refreshIfStale(userId: string, hubspotContactId: string | null, email: string): Promise<{ scopeErrorNow: boolean }> {
+  if (isDemoMode() || !hubspotContactId) return { scopeErrorNow: false };
+
+  const [syncRow] = await db.select().from(contactEmailSync).where(eq(contactEmailSync.userId, userId)).limit(1);
+  const isStale = !syncRow?.lastSyncedAt || Date.now() - syncRow.lastSyncedAt.getTime() > REFRESH_INTERVAL_MS;
+  if (!isStale) return { scopeErrorNow: false };
+
+  try {
+    const records = await fetchContactEmails(hubspotContactId, email);
+    await replaceCachedMessages(userId, records);
+    await markSyncSuccess(userId);
+    return { scopeErrorNow: false };
+  } catch (err) {
+    const scopeError = err instanceof EngagementsScopeError;
+    const message = err instanceof Error ? err.message : String(err);
+    await markSyncFailure(userId, message);
+    return { scopeErrorNow: scopeError };
+  }
+}
+
+/** Messages for one author, newest first, plus a `state` describing how trustworthy/complete that
+ *  list is (see `MessagesState`). Refreshes from HubSpot first if the cache is stale (>10 min old)
+ *  and the author is linked to a HubSpot contact; always returns whatever's cached regardless of
+ *  what that refresh did. */
+export async function getMessagesForUser(userId: string): Promise<MessagesResult> {
   const [user] = await db
     .select({ email: users.email, hubspotContactId: users.hubspotContactId })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
-  if (!user?.hubspotContactId) return { unavailable: false };
 
-  const [syncRow] = await db.select().from(contactEmailSync).where(eq(contactEmailSync.userId, userId)).limit(1);
-  const isStale = !syncRow?.lastSyncedAt || Date.now() - syncRow.lastSyncedAt.getTime() > REFRESH_INTERVAL_MS;
-  if (!isStale) return { unavailable: !!syncRow?.lastError };
-
-  try {
-    const records = await fetchContactEmails(user.hubspotContactId, user.email);
-    await replaceCachedMessages(userId, records);
-    await markSynced(userId, null);
-    return { unavailable: false };
-  } catch (err) {
-    const scopeError = err instanceof EngagementsScopeError;
-    const message = err instanceof Error ? err.message : String(err);
-    await markSynced(userId, message);
-    return { unavailable: scopeError };
+  if (!user?.hubspotContactId) {
+    return { messages: [], state: "not_connected", lastSyncedAt: null };
   }
-}
 
-/** Messages for one author, newest first. Refreshes from HubSpot first if the cache is stale
- *  (>10 min old) and the author is linked to a HubSpot contact; otherwise serves the cache as-is. */
-export async function getMessagesForUser(userId: string): Promise<MessagesResult> {
-  const { unavailable } = await refreshIfStale(userId);
+  const { scopeErrorNow } = await refreshIfStale(userId, user.hubspotContactId, user.email);
 
-  const rows = await db.select().from(contactEmails).where(eq(contactEmails.userId, userId)).orderBy(desc(contactEmails.sentAt));
-  const [syncRow] = await db.select().from(contactEmailSync).where(eq(contactEmailSync.userId, userId)).limit(1);
+  const [rows, [syncRow]] = await Promise.all([
+    db.select().from(contactEmails).where(eq(contactEmails.userId, userId)).orderBy(desc(contactEmails.sentAt)),
+    db.select().from(contactEmailSync).where(eq(contactEmailSync.userId, userId)).limit(1),
+  ]);
+  const messages = rows.map(toSummary);
 
-  return {
-    messages: rows.map(toSummary),
-    unavailable,
-    lastSyncedAt: syncRow?.lastSyncedAt?.toISOString() ?? null,
-  };
+  let state: MessagesState;
+  if (scopeErrorNow) {
+    state = "unavailable";
+  } else if (syncRow?.lastError) {
+    state = syncRow.lastSyncedAt && messages.length > 0 ? "stale_error" : "unavailable";
+  } else if (messages.length === 0) {
+    state = "empty";
+  } else {
+    state = "ok";
+  }
+
+  return { messages, state, lastSyncedAt: syncRow?.lastSyncedAt?.toISOString() ?? null };
 }
 
 /** One message, only if it belongs to `userId`. Does not trigger a refresh — the list view already

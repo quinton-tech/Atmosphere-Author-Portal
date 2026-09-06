@@ -47,7 +47,7 @@ export async function signInWithPasswordAction(_prev: SignInState, formData: For
 
   const h = await headers();
   const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
-  if (isLoginRateLimited(parsed.data.email, ip)) {
+  if (await isLoginRateLimited(parsed.data.email, ip)) {
     return { error: "Too many attempts. Try again in a few minutes, or use a sign-in link instead." };
   }
 

@@ -10,7 +10,8 @@ import { requireAdmin, VIEW_AS_COOKIE } from "@/lib/session";
 import { secureCookiesEnabled } from "@/lib/auth/cookies";
 import { audit } from "@/lib/audit";
 import { redirectWithFlash, runAction } from "../_lib/flash";
-import { inviteAuthor, resendInvite, revokeAccess, forceSignOut } from "../_integrations";
+import { inviteAuthor, resendInvite } from "../_integrations";
+import { adminRevokeAccess, adminForceSignOut } from "@/lib/auth/invite";
 
 export type ActionState = { error?: string; ok?: string };
 
@@ -65,10 +66,13 @@ export async function resendInviteAction(userId: string): Promise<void> {
 export async function revokeAccessAction(userId: string): Promise<void> {
   const admin = await requireAdmin();
   const id = userIdSchema.parse(userId);
+  if (id === admin.id) {
+    redirectWithFlash(LIST_PATH, "error", "You can't revoke your own access. Ask another admin to do it.");
+  }
   await runAction(
     LIST_PATH,
     async () => {
-      await revokeAccess(id);
+      await adminRevokeAccess(id, admin.id);
       await audit(admin.id, "admin.revoke_access", { targetType: "user", targetId: id });
     },
     "Access revoked.",
@@ -78,10 +82,13 @@ export async function revokeAccessAction(userId: string): Promise<void> {
 export async function forceSignOutAction(userId: string): Promise<void> {
   const admin = await requireAdmin();
   const id = userIdSchema.parse(userId);
+  if (id === admin.id) {
+    redirectWithFlash(LIST_PATH, "error", 'You can\'t force-sign-out your own account from here — use "Sign out everywhere" on your Account page instead.');
+  }
   await runAction(
     LIST_PATH,
     async () => {
-      await forceSignOut(id);
+      await adminForceSignOut(id, admin.id);
       await audit(admin.id, "admin.force_signout", { targetType: "user", targetId: id });
     },
     "Signed out everywhere.",

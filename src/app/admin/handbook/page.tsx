@@ -1,9 +1,11 @@
 import { listHandbookVersions } from "./queries";
 import { activateHandbookAction } from "./actions";
-import { UploadForm } from "./UploadForm";
+import { FallbackUploadForm } from "./UploadForm";
+import { UploadFormClient } from "./UploadFormClient";
 import { TestQuestionForm } from "./TestQuestionForm";
 import { PageHeader, Badge, FormError, FormSuccess, PillButton, Table, Th, Td } from "../_components/ui";
 import { fmtDateTime } from "../_lib/format";
+import { isUploadsConfigured } from "@/lib/env";
 
 export default async function HandbookPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const sp = await searchParams;
@@ -18,7 +20,7 @@ export default async function HandbookPage({ searchParams }: { searchParams: Pro
         <FormSuccess message={sp.ok} />
       </div>
 
-      <UploadForm />
+      {isUploadsConfigured() ? <UploadFormClient /> : <FallbackUploadForm />}
 
       <section className="mb-8">
         <p className="eyebrow mb-2">Versions</p>

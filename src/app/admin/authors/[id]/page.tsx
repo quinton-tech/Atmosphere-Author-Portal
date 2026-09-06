@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getBookForUser, listBooksForUser } from "@/lib/data/books";
 import { getAuthorSummary } from "../queries";
 import { getBookRowForAuthor, getWebsiteEditOverride, listNotesForBook } from "./queries";
-import { refreshFromHubspotAction, setWebsiteEditOverrideAction } from "./actions";
+import { refreshFromHubspotAction, resendInviteAction, revokeAccessAction, setWebsiteEditOverrideAction } from "./actions";
 import { PageHeader, Badge, FormError, FormSuccess, PillButton, PillLink, Card } from "../../_components/ui";
 import { fmtDateTime, relativeTime } from "../../_lib/format";
 import { PropertiesTable } from "./PropertiesTable";
@@ -48,6 +48,20 @@ export default async function AuthorDetailPage({
         <FormSuccess message={sp.ok} />
       </div>
 
+      <div className="mb-6 flex flex-wrap gap-2">
+        <form action={refreshFromHubspotAction.bind(null, id)}>
+          <PillButton>Refresh from HubSpot</PillButton>
+        </form>
+        <form action={resendInviteAction.bind(null, id)}>
+          <PillButton>Resend invite</PillButton>
+        </form>
+        {!user.disabledAt ? (
+          <form action={revokeAccessAction.bind(null, id)}>
+            <PillButton variant="danger">Revoke access</PillButton>
+          </form>
+        ) : null}
+      </div>
+
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card>
           <p className="eyebrow">Role</p>
@@ -83,17 +97,18 @@ export default async function AuthorDetailPage({
                 {b.title} — {b.stageLabel}
               </Link>
             ))}
-            <form action={refreshFromHubspotAction.bind(null, id)}>
-              <PillButton>Refresh from HubSpot</PillButton>
-            </form>
           </div>
 
           {book ? (
             <div className="space-y-8">
               <section>
-                <h2 className="eyebrow mb-2">Raw cached properties</h2>
-                <PropertiesTable properties={book.properties ?? {}} />
-                <p className="mt-1 text-xs text-muted">Synced {book.syncedAt ? fmtDateTime(book.syncedAt) : "never"}.</p>
+                <details>
+                  <summary className="eyebrow cursor-pointer select-none">Raw cached properties</summary>
+                  <div className="mt-2">
+                    <PropertiesTable properties={book.properties ?? {}} />
+                    <p className="mt-1 text-xs text-muted">Synced {book.syncedAt ? fmtDateTime(book.syncedAt) : "never"}.</p>
+                  </div>
+                </details>
               </section>
 
               <section>

@@ -11,7 +11,10 @@ import { join } from "node:path";
  */
 describe("drive write guard", () => {
   const ALLOWED = new Set(["src/lib/drive/uploads.ts"]);
-  const MUTATING = /\bfiles\.(create|update|delete|copy)\(|\bpermissions\.create\(/;
+  // The third alternative catches the raw `fetch()` POST to Drive's resumable-upload REST
+  // endpoint (createResumableSession) — that call has no `files.create(`-shaped method on the
+  // googleapis client, so it wouldn't otherwise be caught by this guard.
+  const MUTATING = /\bfiles\.(create|update|delete|copy)\(|\bpermissions\.create\(|googleapis\.com\/upload\/drive/;
 
   function walk(dir: string, out: string[] = []): string[] {
     for (const e of readdirSync(dir, { withFileTypes: true })) {

@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { requireAdmin } from "@/lib/session";
 import { listAuthors } from "./queries";
 import { inviteRowAction, resendInviteAction, revokeAccessAction, forceSignOutAction, viewAsAction } from "./actions";
 import { InviteForm } from "./InviteForm";
+import { RevokeButton } from "./RevokeButton";
 import { PageHeader, Table, Th, Td, Badge, FormError, FormSuccess, Pagination, PillButton } from "../_components/ui";
 import { fmtDate, relativeTime } from "../_lib/format";
 
@@ -10,6 +12,9 @@ export default async function AuthorsPage({
 }: {
   searchParams: Promise<{ q?: string; cursor?: string; ok?: string; error?: string }>;
 }) {
+  // Server-side role check on every request, in addition to src/proxy.ts's gate (CLAUDE.md hard
+  // rule) — also gives us the signed-in admin's own id, needed below to hide self-revoke controls.
+  const admin = await requireAdmin();
   const sp = await searchParams;
   const { rows, nextCursor } = await listAuthors({ q: sp.q, cursor: sp.cursor });
   const nextHref = `/admin/authors?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), cursor: nextCursor ?? "" }).toString()}`;
@@ -48,6 +53,7 @@ export default async function AuthorsPage({
           <tr>
             <Th>Name</Th>
             <Th>Email</Th>
+            <Th>Role</Th>
             <Th>Books &amp; stage</Th>
             <Th>Last login</Th>
             <Th>Invited</Th>
@@ -65,6 +71,9 @@ export default async function AuthorsPage({
               </Td>
               <Td>{u.email}</Td>
               <Td>
+                <Badge tone={u.role === "admin" ? "teal" : "muted"}>{u.role === "admin" ? "Admin" : "Author"}</Badge>
+              </Td>
+              <Td>
                 {u.books.length === 0 ? (
                   <span className="text-muted">No books</span>
                 ) : (
@@ -81,7 +90,7 @@ export default async function AuthorsPage({
               <Td>{u.invitedAt ? fmtDate(u.invitedAt) : <Badge>Not invited</Badge>}</Td>
               <Td>{u.disabledAt ? <Badge tone="bad">Disabled</Badge> : <Badge tone="ok">Active</Badge>}</Td>
               <Td>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {!u.invitedAt ? (
                     <form action={inviteRowAction.bind(null, u.id)}>
                       <PillButton>Invite</PillButton>
@@ -91,12 +100,16 @@ export default async function AuthorsPage({
                       <PillButton>Resend</PillButton>
                     </form>
                   )}
-                  <form action={revokeAccessAction.bind(null, u.id)}>
-                    <PillButton variant="danger">Revoke</PillButton>
-                  </form>
-                  <form action={forceSignOutAction.bind(null, u.id)}>
-                    <PillButton>Force sign-out</PillButton>
-                  </form>
+                  {u.id === admin.id ? (
+                    <span className="eyebrow text-muted">You</span>
+                  ) : (
+                    <>
+                      <RevokeButton email={u.email} action={revokeAccessAction.bind(null, u.id)} />
+                      <form action={forceSignOutAction.bind(null, u.id)}>
+                        <PillButton>Force sign-out</PillButton>
+                      </form>
+                    </>
+                  )}
                   {u.role === "author" ? (
                     <form action={viewAsAction.bind(null, u.id)}>
                       <PillButton>View as</PillButton>
@@ -108,7 +121,7 @@ export default async function AuthorsPage({
           ))}
           {rows.length === 0 ? (
             <tr>
-              <Td colSpan={7} className="text-muted">
+              <Td colSpan={8} className="text-muted">
                 <span>No authors match.</span>
               </Td>
             </tr>

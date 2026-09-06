@@ -123,6 +123,12 @@ export type WebsiteView = {
   status: string | null;
   packageName: string | null;
   domainExpiry: string | null; // ISO
+  /** "ok" (more than 30 days out), "soon" (<=30 days), "past" (expiry has passed), or null when
+   *  there's no domainExpiry. Computed server-side (alongside domainExpiryDays) so components never
+   *  need `Date.now()`/`new Date()` at render time — see react-hooks/purity. */
+  domainStatus: "ok" | "soon" | "past" | null;
+  /** Days until domainExpiry (negative once past), or null when there's no domainExpiry. */
+  domainExpiryDays: number | null;
 };
 
 export type AuthorInfo = {
@@ -157,6 +163,12 @@ export type BookDetail = BookSummary & {
   teaser: string | null;
   initiationDate: string | null; // ISO
   publicationDate: string | null; // ISO
+  /** True once publicationDate has passed. Computed server-side so BookHeader never needs
+   *  `Date.now()`/`new Date()` at render time — see react-hooks/purity. */
+  isPublished: boolean;
+  /** True when this book has a Drive folder linked (`books.driveFolderId`). Lets FileGrid
+   *  distinguish "your team hasn't connected your files yet" from "connected, nothing shared yet". */
+  filesConnected: boolean;
   actions: ActionItem[];
   files: FileView[];
   notes: NoteView[];

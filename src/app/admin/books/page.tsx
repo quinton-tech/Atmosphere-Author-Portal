@@ -2,11 +2,22 @@ import Link from "next/link";
 import { listBooks } from "./queries";
 import { PageHeader, Table, Th, Td, Badge, Pagination, PillButton } from "../_components/ui";
 import { fmtDateTime } from "../_lib/format";
+import { hasPrevPage, trailPop, trailPush } from "../_lib/cursor";
 
-export default async function BooksPage({ searchParams }: { searchParams: Promise<{ q?: string; cursor?: string }> }) {
+export default async function BooksPage({ searchParams }: { searchParams: Promise<{ q?: string; cursor?: string; trail?: string }> }) {
   const sp = await searchParams;
   const { rows, nextCursor } = await listBooks({ q: sp.q, cursor: sp.cursor });
-  const nextHref = `/admin/books?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), cursor: nextCursor ?? "" }).toString()}`;
+  const nextHref = `/admin/books?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), cursor: nextCursor ?? "", trail: trailPush(sp.trail, sp.cursor) }).toString()}`;
+
+  let prevHref: string | null = null;
+  if (hasPrevPage(sp.trail)) {
+    const { cursor: prevCursor, trail: remainingTrail } = trailPop(sp.trail);
+    const prevParams = new URLSearchParams();
+    if (sp.q) prevParams.set("q", sp.q);
+    if (prevCursor) prevParams.set("cursor", prevCursor);
+    if (remainingTrail) prevParams.set("trail", remainingTrail);
+    prevHref = `/admin/books?${prevParams.toString()}`;
+  }
 
   return (
     <div>
@@ -66,7 +77,7 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
         </tbody>
       </Table>
 
-      <Pagination hasMore={!!nextCursor} nextHref={nextHref} />
+      <Pagination hasMore={!!nextCursor} nextHref={nextHref} prevHref={prevHref} />
     </div>
   );
 }

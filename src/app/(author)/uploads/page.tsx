@@ -4,14 +4,9 @@ import { defaultBookIdForUser, listBooksForUser } from "@/lib/data/books";
 import { listUploadsForUser, UPLOAD_MAX_PER_DAY } from "@/lib/data/uploads";
 import { effectiveUserId, requireUser } from "@/lib/session";
 
-export default async function UploadsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ ok?: string; error?: string }>;
-}) {
+export default async function UploadsPage() {
   const user = await requireUser();
   const userId = effectiveUserId(user);
-  const { ok, error } = await searchParams;
 
   const [books, uploads, defaultBookId] = await Promise.all([
     listBooksForUser(userId),
@@ -43,7 +38,7 @@ export default async function UploadsPage({
       ) : null}
 
       <section className="mt-10">
-        <UploadForm redirectTo="/uploads" books={books} defaultBookId={defaultBookId} error={error} ok={ok} />
+        <UploadForm books={books} defaultBookId={defaultBookId} />
       </section>
 
       <section className="mt-12">

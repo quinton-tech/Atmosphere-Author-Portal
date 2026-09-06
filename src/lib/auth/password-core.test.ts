@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { hashPassword, verifyPasswordHash, generateResetToken, hashResetToken, PASSWORD_MIN_LENGTH } from "./password-core";
+import { hashPassword, verifyPasswordHash, generateResetToken, hashResetToken, PASSWORD_MIN_LENGTH, PASSWORD_RULES_TEXT } from "./password-core";
+
+describe("PASSWORD_RULES_TEXT", () => {
+  it("states the actual minimum length enforced elsewhere", () => {
+    expect(PASSWORD_RULES_TEXT).toContain(`${PASSWORD_MIN_LENGTH} characters`);
+  });
+});
 
 describe("password hashing (Argon2id)", () => {
   it("hashes and verifies a matching password", async () => {

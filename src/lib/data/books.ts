@@ -109,22 +109,37 @@ function buildNextUpdate(currentStage: StageView | null, now: Date): NextUpdate 
   return { label: "Next update expected around", at: estimate.toISOString() };
 }
 
+const DOMAIN_EXPIRY_SOON_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
 function buildWebsite(
   bookId: string,
   props: Record<string, string | null>,
   overrides: Record<string, string>,
   labels: DisplayLabels,
+  now: Date,
 ): WebsiteView | null {
   if (!props.websiteUrl && !props.websiteDomain && !props.websiteStatus) return null;
   const url = normalizeWebsiteUrl(props.websiteUrl);
   const rawStatus = props.websiteStatus?.trim() ?? null;
+  const domainExpiry = parseDate(props.websiteDomainExpiry);
+
+  let domainStatus: WebsiteView["domainStatus"] = null;
+  let domainExpiryDays: number | null = null;
+  if (domainExpiry) {
+    const diffMs = domainExpiry.getTime() - now.getTime();
+    domainExpiryDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+    domainStatus = diffMs <= 0 ? "past" : diffMs <= DOMAIN_EXPIRY_SOON_WINDOW_MS ? "soon" : "ok";
+  }
+
   return {
     url,
     editUrl: overrides[bookId] ?? deriveWpAdminUrl(url),
     hostingUrl: BLUEHOST_HOSTING_URL,
     status: (rawStatus && WEBSITE_STATUS_COPY[rawStatus]) || friendly("websiteStatus", props.websiteStatus, labels),
     packageName: friendly("websitePackage", props.websitePackage, labels),
-    domainExpiry: parseDate(props.websiteDomainExpiry)?.toISOString() ?? null,
+    domainExpiry: domainExpiry?.toISOString() ?? null,
+    domainStatus,
+    domainExpiryDays,
   };
 }
 
@@ -295,11 +310,13 @@ export async function getBookForUser(
     timeline: buildTimeline(props, stages, currentKey, labels, now, milestoneEvents),
     team: buildTeam(props, labels),
     milestones: visibleMilestones,
-    website: buildWebsite(book.id, props, websiteOverrides, labels),
+    website: buildWebsite(book.id, props, websiteOverrides, labels, now),
     package: friendly("package", props.package, labels),
     teaser: cleanTeaser(props.teaser),
     initiationDate: initiationDateIso,
     publicationDate: publicationDateIso,
+    isPublished: Boolean(publicationDateIso && new Date(publicationDateIso).getTime() <= now.getTime()),
+    filesConnected: Boolean(book.driveFolderId),
     actions: evaluateActionRules(props, rules),
     files: filesView,
     notes: noteRows.map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt.toISOString() })),
@@ -330,9 +347,14 @@ export async function getAuthorInfoForUser(userId: string): Promise<AuthorInfo |
   };
 }
 
-/** Default book to show: most recently updated, non-archived first. */
-export async function defaultBookIdForUser(userId: string): Promise<string | null> {
+/**
+ * Default book to show: most recently updated, non-archived first — unless `preferredBookId`
+ * (the `ap_book` cookie set by BookSwitcher) names one of this user's own books, in which case
+ * that's returned instead so `/dashboard` reopens the book the author was last looking at.
+ */
+export async function defaultBookIdForUser(userId: string, preferredBookId?: string | null): Promise<string | null> {
   const list = await listBooksForUser(userId);
+  if (preferredBookId && list.some((b) => b.id === preferredBookId)) return preferredBookId;
   return (list.find((b) => !b.isArchived) ?? list[0])?.id ?? null;
 }
 

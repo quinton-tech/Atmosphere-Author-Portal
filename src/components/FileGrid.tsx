@@ -12,10 +12,21 @@ function shortKind(mimeType: string | null): string {
   return "File";
 }
 
-/** Grouped by category. Thumbnails and downloads always route through the portal's file proxy. */
-export function FileGrid({ files }: { files: FileView[] }) {
+/**
+ * Grouped by category. Thumbnails and downloads always route through the portal's file proxy.
+ * `filesConnected` (books.driveFolderId) distinguishes "your team hasn't connected your files yet"
+ * (no Drive folder linked) from "connected, nothing shared yet" (folder linked, nothing visible).
+ */
+export function FileGrid({ files, filesConnected = true }: { files: FileView[]; filesConnected?: boolean }) {
   if (files.length === 0) {
-    return <EmptyState title="Nothing shared yet." message="Check back soon or email your Author Manager." />;
+    return filesConnected ? (
+      <EmptyState title="Nothing shared yet." message="Check back soon or email your Author Manager." />
+    ) : (
+      <EmptyState
+        title="Your team hasn't connected your files yet."
+        message="Check back soon or email your Author Manager."
+      />
+    );
   }
 
   const groups = new Map<string, FileView[]>();

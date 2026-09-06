@@ -28,6 +28,13 @@ export type HubSpotContactSummary = {
   email: string | null;
   firstname: string | null;
   lastname: string | null;
+  /** Standard HubSpot Contact properties — the canonical author profile (see src/lib/data/profile.ts). */
+  phone: string | null;
+  street: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  country: string | null;
 };
 
 /**
@@ -37,8 +44,22 @@ export type HubSpotContactSummary = {
  */
 export interface HubSpotReader {
   getProjectSchema(): Promise<{ properties: HubSpotSchemaProperty[] }>;
-  /** 100 results per page (HubSpot's search page size cap). */
-  searchProjectsModifiedSince(since: Date | null, after?: string): Promise<{ results: HubSpotProject[]; nextAfter?: string }>;
+  /**
+   * 100 results per page (HubSpot's search page size cap). `total` is the search's total match
+   * count so callers can detect when they're approaching HubSpot's 10,000-result search ceiling
+   * (https://developers.hubspot.com/docs/api-reference/latest/crm/search-the-crm) and fall back to
+   * `searchProjectsAfterId`'s keyset pagination instead of paging further with `after`.
+   */
+  searchProjectsModifiedSince(since: Date | null, after?: string): Promise<{ results: HubSpotProject[]; nextAfter?: string; total?: number }>;
+  /**
+   * Keyset pagination immune to the 10,000-result search ceiling: sorted by `hs_object_id`
+   * ascending, filtered to ids greater than `lastObjectId` (null = start from the beginning), page
+   * size 100. Every call is a fresh search (no `after` cursor), so each one gets its own 10,000
+   * budget — callers restart with the returned `lastObjectId` instead of paging deeper into one
+   * query. `since`, when given, additionally restricts to Projects modified on/after that date
+   * (used by incremental sync's overflow fallback).
+   */
+  searchProjectsAfterId(lastObjectId: string | null, since?: Date | null): Promise<{ results: HubSpotProject[]; lastObjectId: string | null }>;
   getProject(id: string): Promise<HubSpotProject | null>;
   /** Batch read, chunked internally to HubSpot's 100-per-call limit. */
   getContactsByIds(ids: string[]): Promise<Map<string, HubSpotContactSummary>>;
@@ -155,7 +176,7 @@ class HubSpotApiClient implements HubSpotReader, HubSpotContactWriter {
     return out;
   }
 
-  async searchProjectsModifiedSince(since: Date | null, after?: string): Promise<{ results: HubSpotProject[]; nextAfter?: string }> {
+  async searchProjectsModifiedSince(since: Date | null, after?: string): Promise<{ results: HubSpotProject[]; nextAfter?: string; total?: number }> {
     const properties = await this.schemaPropertyNames();
     const searchRequest = {
       filterGroups: since
@@ -177,7 +198,33 @@ class HubSpotApiClient implements HubSpotReader, HubSpotContactWriter {
       updatedAt: new Date(r.updatedAt),
       contactIds: contactIdsByProject.get(r.id) ?? [],
     }));
-    return { results, nextAfter: res.paging?.next?.after };
+    return { results, nextAfter: res.paging?.next?.after, total: res.total };
+  }
+
+  async searchProjectsAfterId(lastObjectId: string | null, since?: Date | null): Promise<{ results: HubSpotProject[]; lastObjectId: string | null }> {
+    const properties = await this.schemaPropertyNames();
+    const filters: { propertyName: string; operator: string; value: string }[] = [];
+    if (lastObjectId) filters.push({ propertyName: "hs_object_id", operator: "GT", value: lastObjectId });
+    if (since) filters.push({ propertyName: "hs_lastmodifieddate", operator: "GTE", value: String(since.getTime()) });
+    const searchRequest = {
+      filterGroups: filters.length ? [{ filters }] : [],
+      sorts: [{ propertyName: "hs_object_id", direction: "ASCENDING" }],
+      properties,
+      limit: 100,
+      // Deliberately no `after`: each restart is a brand-new search (its own 10,000-result budget)
+      // rather than a deeper page into the same one. See the HubSpotReader.searchProjectsAfterId doc.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    const res = await withRetry(() => this.client.crm.objects.searchApi.doSearch(this.objectType, searchRequest));
+    const contactIdsByProject = await this.attachContactIds(res.results.map((r) => r.id));
+    const results: HubSpotProject[] = res.results.map((r) => ({
+      id: r.id,
+      properties: r.properties,
+      updatedAt: new Date(r.updatedAt),
+      contactIds: contactIdsByProject.get(r.id) ?? [],
+    }));
+    const newLastObjectId = results.length ? results[results.length - 1].id : lastObjectId;
+    return { results, lastObjectId: newLastObjectId };
   }
 
   async getProject(id: string): Promise<HubSpotProject | null> {
@@ -231,7 +278,7 @@ class HubSpotApiClient implements HubSpotReader, HubSpotContactWriter {
       const res = await withRetry(() =>
         this.client.crm.contacts.batchApi.read({
           inputs: idsChunk.map((id) => ({ id })),
-          properties: ["email", "firstname", "lastname"],
+          properties: ["email", "firstname", "lastname", "phone", "address", "city", "state", "zip", "country"],
           propertiesWithHistory: [],
         }),
       );
@@ -241,6 +288,12 @@ class HubSpotApiClient implements HubSpotReader, HubSpotContactWriter {
           email: c.properties.email ?? null,
           firstname: c.properties.firstname ?? null,
           lastname: c.properties.lastname ?? null,
+          phone: c.properties.phone ?? null,
+          street: c.properties.address ?? null,
+          city: c.properties.city ?? null,
+          region: c.properties.state ?? null,
+          postalCode: c.properties.zip ?? null,
+          country: c.properties.country ?? null,
         });
       }
     }

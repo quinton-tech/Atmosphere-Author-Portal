@@ -45,6 +45,16 @@ export const users = pgTable(
     image: text("image"),
     role: roleEnum("role").notNull().default("author"),
     hubspotContactId: text("hubspot_contact_id"),
+    // ---- Canonical author profile (mirrored from the HubSpot Contact at sync time; see
+    // src/lib/data/profile.ts and src/lib/hubspot/contact-info.ts). Book-cache Project properties
+    // are NOT the source of truth for these — see CLAUDE.md / review finding #1. ----
+    phone: text("phone"),
+    street: text("street"),
+    city: text("city"),
+    region: text("region"),
+    postalCode: text("postal_code"),
+    country: text("country"),
+    profileSyncedAt: timestamp("profile_synced_at", { mode: "date" }),
     passwordHash: text("password_hash"),
     totpSecret: text("totp_secret"),
     totpEnabled: boolean("totp_enabled").notNull().default(false),
@@ -378,3 +388,4 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export * from "./schema-team";
 export * from "./schema-uploads";
 export * from "./schema-comms";
+export * from "./schema-auth";

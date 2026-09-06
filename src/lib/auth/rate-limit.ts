@@ -1,88 +1,58 @@
 /**
- * Minimal in-memory fixed-window rate limiter.
+ * Postgres-backed fixed-window rate limiter.
  *
- * Good enough for a single Node.js server process. It resets on deploy/restart
- * and does not share state across serverless instances — fine for the login
- * rate limits we use it for today (10 attempts / 15 min per email and per IP),
- * but if this app moves to multi-instance serverless, swap this for a shared
- * store (Upstash/Redis) keyed the same way. No DB dependency so it's cheap to
- * unit test.
+ * Previously an in-memory `Map` per limiter — fine for a single long-lived Node process, but
+ * wrong for this app's actual deployment: it reset on every deploy/cold start and, worse, kept
+ * separate counters per serverless instance, so the *effective* limit at N concurrent instances
+ * was `max * N`, not `max`. This version stores one row per key in the `rate_limits` table
+ * (src/db/schema-auth.ts) and updates it with a single atomic `INSERT ... ON CONFLICT DO UPDATE`,
+ * so concurrent requests across any number of instances see one consistent counter.
+ *
+ * The `CASE` expressions below are the enforcement; `./rate-limit-core.ts`'s `nextRateLimitState`
+ * mirrors the same logic in plain JS purely so it can be unit-tested without a database — it is
+ * not itself part of the enforcement path.
  */
+import "server-only";
+import { sql } from "drizzle-orm";
+import { db } from "@/db";
+import { rateLimits } from "@/db/schema-auth";
+import { toRateLimitResult, type RateLimitResult } from "./rate-limit-core";
 
-export type RateLimitResult = {
-  /** Whether this attempt is allowed. */
-  allowed: boolean;
-  /** Attempts remaining in the current window, after this check. */
-  remaining: number;
-  /** Milliseconds until the window resets, if blocked. */
-  retryAfterMs: number;
-};
+export type { RateLimitResult } from "./rate-limit-core";
 
-export interface RateLimiter {
-  /** Records an attempt for `key` and reports whether it was allowed. */
-  consume(key: string, now?: number): RateLimitResult;
-  /** Reports the current state for `key` without recording an attempt. */
-  peek(key: string, now?: number): RateLimitResult;
-  /** Clears any record for `key` (e.g. after a successful login). */
-  reset(key: string): void;
-  /** Number of tracked keys. Exposed for tests / diagnostics only. */
-  size(): number;
+const ALWAYS_ALLOWED: RateLimitResult = { allowed: true, remaining: 0, retryAfterMs: 0 };
+
+/**
+ * Records one attempt for `key` and reports whether it's allowed, per `{ max, windowMs }`. Safe
+ * to call concurrently for the same key from any number of instances.
+ */
+async function consumeRateLimit(key: string, opts: { max: number; windowMs: number }, now: Date = new Date()): Promise<RateLimitResult> {
+  const freshWindowEnds = new Date(now.getTime() + opts.windowMs);
+  const [row] = await db
+    .insert(rateLimits)
+    .values({ key, count: 1, windowEnds: freshWindowEnds })
+    .onConflictDoUpdate({
+      target: rateLimits.key,
+      set: {
+        count: sql`CASE WHEN ${rateLimits.windowEnds} < now() THEN 1 ELSE ${rateLimits.count} + 1 END`,
+        windowEnds: sql`CASE WHEN ${rateLimits.windowEnds} < now() THEN ${freshWindowEnds} ELSE ${rateLimits.windowEnds} END`,
+      },
+    })
+    .returning({ count: rateLimits.count, windowEnds: rateLimits.windowEnds });
+
+  return toRateLimitResult(row, opts.max, now);
 }
 
-type Bucket = { count: number; windowStart: number };
+/** 10 attempts / 15 minutes, per the auth brief. */
+const LOGIN_LIMIT = { max: 10, windowMs: 15 * 60 * 1000 };
 
-export function createRateLimiter(opts: { max: number; windowMs: number }): RateLimiter {
-  const buckets = new Map<string, Bucket>();
-
-  function currentBucket(key: string, now: number): Bucket | undefined {
-    const b = buckets.get(key);
-    if (!b) return undefined;
-    if (now - b.windowStart >= opts.windowMs) {
-      buckets.delete(key);
-      return undefined;
-    }
-    return b;
-  }
-
-  return {
-    consume(key, now = Date.now()) {
-      const existing = currentBucket(key, now);
-      if (!existing) {
-        buckets.set(key, { count: 1, windowStart: now });
-        return { allowed: true, remaining: opts.max - 1, retryAfterMs: 0 };
-      }
-      if (existing.count >= opts.max) {
-        return { allowed: false, remaining: 0, retryAfterMs: opts.windowMs - (now - existing.windowStart) };
-      }
-      existing.count += 1;
-      return { allowed: true, remaining: opts.max - existing.count, retryAfterMs: 0 };
-    },
-    peek(key, now = Date.now()) {
-      const existing = currentBucket(key, now);
-      if (!existing) return { allowed: true, remaining: opts.max, retryAfterMs: 0 };
-      const allowed = existing.count < opts.max;
-      return {
-        allowed,
-        remaining: Math.max(0, opts.max - existing.count),
-        retryAfterMs: allowed ? 0 : opts.windowMs - (now - existing.windowStart),
-      };
-    },
-    reset(key) {
-      buckets.delete(key);
-    },
-    size() {
-      return buckets.size;
-    },
-  };
-}
-
-/** 10 attempts / 15 minutes, per the auth brief. Keyed by callers as `email:<addr>` or `ip:<addr>`. */
-export const loginRateLimiter: RateLimiter = createRateLimiter({ max: 10, windowMs: 15 * 60 * 1000 });
-
-/** True if the login attempt for this email+ip pair should be blocked. Consumes both buckets. */
-export function isLoginRateLimited(email: string, ip: string | null): boolean {
-  const emailResult = loginRateLimiter.consume(`email:${email.toLowerCase()}`);
-  const ipResult = ip ? loginRateLimiter.consume(`ip:${ip}`) : { allowed: true, remaining: 0, retryAfterMs: 0 };
+/** True if the login attempt for this email+ip pair should be blocked. Consumes both buckets
+ *  (even when one already reports blocked) so a client can't learn which bucket tripped. */
+export async function isLoginRateLimited(email: string, ip: string | null): Promise<boolean> {
+  const [emailResult, ipResult] = await Promise.all([
+    consumeRateLimit(`login:email:${email.toLowerCase()}`, LOGIN_LIMIT),
+    ip ? consumeRateLimit(`login:ip:${ip}`, LOGIN_LIMIT) : Promise.resolve(ALWAYS_ALLOWED),
+  ]);
   return !emailResult.allowed || !ipResult.allowed;
 }
 
@@ -92,13 +62,15 @@ export function isLoginRateLimited(email: string, ip: string | null): boolean {
  * mail-bomb an address (each request sends an email) or run up the HIBP outbound-request count.
  * 5 requests / hour per address, 20/hour per IP (shared IPs — offices, NAT — get a looser cap).
  */
-export const passwordResetRateLimiter: RateLimiter = createRateLimiter({ max: 5, windowMs: 60 * 60 * 1000 });
-const passwordResetIpRateLimiter: RateLimiter = createRateLimiter({ max: 20, windowMs: 60 * 60 * 1000 });
+const RESET_EMAIL_LIMIT = { max: 5, windowMs: 60 * 60 * 1000 };
+const RESET_IP_LIMIT = { max: 20, windowMs: 60 * 60 * 1000 };
 
 /** True if this password-reset request should be blocked. Consumes both buckets. */
-export function isPasswordResetRateLimited(email: string, ip: string | null): boolean {
-  const emailResult = passwordResetRateLimiter.consume(`email:${email.toLowerCase()}`);
-  const ipResult = ip ? passwordResetIpRateLimiter.consume(`ip:${ip}`) : { allowed: true, remaining: 0, retryAfterMs: 0 };
+export async function isPasswordResetRateLimited(email: string, ip: string | null): Promise<boolean> {
+  const [emailResult, ipResult] = await Promise.all([
+    consumeRateLimit(`reset:email:${email.toLowerCase()}`, RESET_EMAIL_LIMIT),
+    ip ? consumeRateLimit(`reset:ip:${ip}`, RESET_IP_LIMIT) : Promise.resolve(ALWAYS_ALLOWED),
+  ]);
   return !emailResult.allowed || !ipResult.allowed;
 }
 
@@ -107,8 +79,9 @@ export function isPasswordResetRateLimited(email: string, ip: string | null): bo
  * window) up to 3 are valid at once, so this endpoint needs its own lockout independent of the
  * login rate limiter. 10 attempts / 15 minutes per already-authenticated admin user id.
  */
-export const totpRateLimiter: RateLimiter = createRateLimiter({ max: 10, windowMs: 15 * 60 * 1000 });
+const TOTP_LIMIT = { max: 10, windowMs: 15 * 60 * 1000 };
 
-export function isTotpRateLimited(userId: string): boolean {
-  return !totpRateLimiter.consume(`user:${userId}`).allowed;
+export async function isTotpRateLimited(userId: string): Promise<boolean> {
+  const result = await consumeRateLimit(`totp:user:${userId}`, TOTP_LIMIT);
+  return !result.allowed;
 }

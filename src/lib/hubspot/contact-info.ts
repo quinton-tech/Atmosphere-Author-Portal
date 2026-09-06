@@ -55,8 +55,9 @@ function fieldsToRecord(fields: readonly WritableContactField[], current: Record
 
 /**
  * An author updates their own phone/address. Per CLAUDE.md's hard rule: validated with zod,
- * written to HubSpot first, then mirrored into the cache, and audited with before/after. Throttled
- * to `CONTACT_INFO_MAX_UPDATES_PER_DAY` per user per rolling 24h, counted from `audit_log`.
+ * written to HubSpot first, then mirrored into the canonical profile (`users`), and audited with
+ * before/after. Throttled to `CONTACT_INFO_MAX_UPDATES_PER_DAY` per user per rolling 24h, counted
+ * from `audit_log`.
  */
 export async function updateAuthorContactInfo(
   userId: string,
@@ -81,22 +82,39 @@ export async function updateAuthorContactInfo(
   }
 
   const userBooks = await db.select({ id: books.id, hubspotProjectId: books.hubspotProjectId }).from(books).where(eq(books.userId, userId));
-  const mostRecentCache = userBooks.length
-    ? (
-        await db
-          .select()
-          .from(bookCache)
-          .where(inArray(bookCache.bookId, userBooks.map((b) => b.id)))
-          .orderBy(desc(bookCache.syncedAt))
-          .limit(1)
-      )[0]
-    : undefined;
-  const current = mostRecentCache?.properties ?? {};
 
   const [target, overrides] = await Promise.all([
     getAppSetting<ContactInfoTarget>("contactInfoTarget").then((t) => t ?? "contact"),
     getAppSetting<PropertyMap>("propertyMap").then((m) => m ?? {}),
   ]);
+
+  // The Contact is the canonical profile (`users` columns, kept current by `applyPlan` at sync time
+  // and by every successful call here — see review finding #1), so diff against that when writing
+  // to the Contact. Writing to the Project instead means the Project's own cached properties are
+  // the field's actual current value in HubSpot, so diff against those.
+  let current: Record<string, string | null>;
+  if (target === "contact") {
+    current = fieldsToRecord(WRITABLE_CONTACT_FIELDS, {
+      phone: user.phone,
+      street: user.street,
+      city: user.city,
+      region: user.region,
+      postalCode: user.postalCode,
+      country: user.country,
+    });
+  } else {
+    const mostRecentCache = userBooks.length
+      ? (
+          await db
+            .select()
+            .from(bookCache)
+            .where(inArray(bookCache.bookId, userBooks.map((b) => b.id)))
+            .orderBy(desc(bookCache.syncedAt))
+            .limit(1)
+        )[0]
+      : undefined;
+    current = mostRecentCache?.properties ?? {};
+  }
 
   const map = await resolveContactInfoMap(target, overrides);
   const { patch, changed, unmapped } = planContactInfoPatch(input, current, map);
@@ -129,20 +147,18 @@ export async function updateAuthorContactInfo(
     }
   }
 
-  // Mirror into the cache for every one of this author's books so the portal reflects the change
-  // immediately, without waiting for the next sync.
-  const patchByPortalId = Object.fromEntries(changed.map((field) => [field, input[field] as string]));
-  if (userBooks.length > 0) {
-    await Promise.all(
-      userBooks.map(async (b) => {
-        const [existing] = await db.select().from(bookCache).where(eq(bookCache.bookId, b.id)).limit(1);
-        const merged = { ...(existing?.properties ?? {}), ...patchByPortalId };
-        await db
-          .insert(bookCache)
-          .values({ bookId: b.id, properties: merged, stageKey: existing?.stageKey ?? null, hubspotUpdatedAt: existing?.hubspotUpdatedAt ?? null, syncedAt: new Date() })
-          .onConflictDoUpdate({ target: bookCache.bookId, set: { properties: merged, syncedAt: new Date() } });
-      }),
-    );
+  // Mirror into the canonical profile (`users`) so the portal reflects the change immediately,
+  // without waiting for the next sync to re-pull the Contact — regardless of which HubSpot object
+  // was just written to. Book caches are no longer touched here: Project properties come back on
+  // their own schedule via sync, and are never the author-facing profile's source of truth.
+  const patchByPortalId = Object.fromEntries(changed.map((field) => [field, input[field] as string])) as Partial<
+    Record<WritableContactField, string>
+  >;
+  if (changed.length > 0) {
+    await db
+      .update(users)
+      .set({ ...patchByPortalId, profileSyncedAt: new Date(), updatedAt: new Date() })
+      .where(eq(users.id, userId));
   }
 
   const before = fieldsToRecord(WRITABLE_CONTACT_FIELDS, current);
